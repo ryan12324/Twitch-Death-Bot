@@ -2,27 +2,32 @@
 Death screen detection engine.
 
 Uses multiple strategies to detect death screens:
-1. Template matching - compare against known death screen reference images
+1. Template matching - slide a reference image across the frame to find it
 2. Color analysis - check if the frame matches death screen color profiles
-3. Structural similarity - detect sudden scene changes to dark/death screens
+3. Brightness analysis - death screens are often very dark or very bright
+4. Fade detection - detect full-screen fade to black/red
+5. Scene change detection - detect sudden transitions between frames
 
-All strategies are combined with configurable weights for final confidence.
+Templates are sub-images (e.g. a cropped "YOU DIED" text). The detector
+scans the frame at multiple scales to find them, like ctrl+F for images.
 """
 
 import logging
-import os
 import time
 from pathlib import Path
 
 import cv2
 import numpy as np
-from skimage.metrics import structural_similarity as ssim
 
 from game_profiles.profiles import GameProfile, ScreenRegion
 
 logger = logging.getLogger(__name__)
 
 TEMPLATES_DIR = Path(__file__).parent.parent / "game_profiles" / "templates"
+
+# Scales to try when searching for a template in the frame.
+# Covers cases where the stream resolution doesn't match the screenshot.
+SEARCH_SCALES = [1.0, 0.75, 0.5, 1.25, 1.5]
 
 
 class DeathDetector:
@@ -35,35 +40,39 @@ class DeathDetector:
         self.profile = profile
         self.threshold = threshold
         self.cooldown = profile.cooldown_override or cooldown
-        self.templates: list[np.ndarray] = []
+        self.templates: list[np.ndarray] = []  # grayscale templates
         self.last_detection_time: float = 0.0
         self.previous_frame: np.ndarray | None = None
-        self.death_frame_count: int = 0  # consecutive frames that look like death
-        self.required_consecutive: int = 2  # need N consecutive frames to confirm
+        self.death_frame_count: int = 0
+        self.required_consecutive: int = 2
 
         self._load_templates()
 
     def _load_templates(self) -> None:
-        """Load reference death screen template images for the current game."""
+        """Load reference template images (sub-images to search for)."""
         template_path = TEMPLATES_DIR / self.profile.template_dir
         if not template_path.exists():
             logger.warning(
-                "No template directory found at %s. "
-                "Template matching will be skipped. "
-                "Detection will rely on color/brightness analysis.",
+                "No template directory at %s — template matching disabled.",
                 template_path,
             )
             return
 
         for img_file in sorted(template_path.iterdir()):
             if img_file.suffix.lower() in (".png", ".jpg", ".jpeg", ".bmp"):
-                template = cv2.imread(str(img_file))
-                if template is not None:
-                    self.templates.append(template)
-                    logger.info("Loaded template: %s", img_file.name)
+                img = cv2.imread(str(img_file))
+                if img is not None:
+                    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+                    self.templates.append(gray)
+                    logger.info(
+                        "Loaded template: %s (%dx%d)",
+                        img_file.name,
+                        gray.shape[1],
+                        gray.shape[0],
+                    )
 
         logger.info(
-            "Loaded %d templates for %s",
+            "Loaded %d template(s) for %s",
             len(self.templates),
             self.profile.display_name,
         )
@@ -80,42 +89,57 @@ class DeathDetector:
         return frame[y1:y2, x1:x2]
 
     def _template_match_score(self, frame: np.ndarray) -> float:
-        """Score how well the frame matches any loaded death screen template."""
+        """
+        Slide each template across the frame at multiple scales.
+        Returns the best match score (0-1). This is a true sub-image
+        search — the template can be found anywhere on screen.
+        """
         if not self.templates:
             return 0.0
 
-        best_score = 0.0
         frame_gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+        frame_h, frame_w = frame_gray.shape[:2]
+
+        best_score = 0.0
 
         for template in self.templates:
-            template_resized = cv2.resize(
-                template, (frame.shape[1], frame.shape[0])
-            )
-            template_gray = cv2.cvtColor(template_resized, cv2.COLOR_BGR2GRAY)
+            tmpl_h, tmpl_w = template.shape[:2]
 
-            # Structural similarity
-            score, _ = ssim(frame_gray, template_gray, full=True)
-            best_score = max(best_score, score)
+            for scale in SEARCH_SCALES:
+                # Resize template to this scale
+                new_w = int(tmpl_w * scale)
+                new_h = int(tmpl_h * scale)
 
-            # Also try normalized cross-correlation on regions
-            for region in self.profile.screen_regions:
-                region_frame = self._extract_region(frame_gray, region)
-                region_template = self._extract_region(template_gray, region)
-
-                if region_frame.size == 0 or region_template.size == 0:
+                # Template must be smaller than the frame
+                if new_w >= frame_w or new_h >= frame_h:
+                    continue
+                if new_w < 10 or new_h < 10:
                     continue
 
-                # Resize template region to match frame region
-                region_template = cv2.resize(
-                    region_template,
-                    (region_frame.shape[1], region_frame.shape[0]),
-                )
+                scaled = cv2.resize(template, (new_w, new_h))
 
-                result = cv2.matchTemplate(
-                    region_frame, region_template, cv2.TM_CCOEFF_NORMED
-                )
-                _, max_val, _, _ = cv2.minMaxLoc(result)
-                best_score = max(best_score, max_val)
+                # If we have screen regions, search within each region
+                # Otherwise search the whole frame
+                search_areas = []
+                if self.profile.screen_regions:
+                    for region in self.profile.screen_regions:
+                        area = self._extract_region(frame_gray, region)
+                        if area.shape[0] > new_h and area.shape[1] > new_w:
+                            search_areas.append(area)
+
+                if not search_areas:
+                    search_areas = [frame_gray]
+
+                for area in search_areas:
+                    result = cv2.matchTemplate(
+                        area, scaled, cv2.TM_CCOEFF_NORMED
+                    )
+                    _, max_val, _, _ = cv2.minMaxLoc(result)
+                    best_score = max(best_score, max_val)
+
+                    # Early exit if we already found a strong match
+                    if best_score > 0.85:
+                        return best_score
 
         return best_score
 
@@ -145,7 +169,6 @@ class DeathDetector:
 
         if self.profile.max_brightness is not None:
             if mean_brightness <= self.profile.max_brightness:
-                # The darker it is (relative to threshold), the higher the score
                 score = max(
                     score,
                     1.0 - (mean_brightness / self.profile.max_brightness),
@@ -172,7 +195,6 @@ class DeathDetector:
         total_pixels = frame.shape[0] * frame.shape[1]
         fade_ratio = np.count_nonzero(mask) / total_pixels
 
-        # Need a very high ratio of pixels to be in the fade color range
         if fade_ratio > 0.85:
             return fade_ratio
         return fade_ratio * 0.5
@@ -185,18 +207,14 @@ class DeathDetector:
         current_gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
         previous_gray = cv2.cvtColor(self.previous_frame, cv2.COLOR_BGR2GRAY)
 
-        # Resize to common size for comparison
         size = (320, 240)
         current_small = cv2.resize(current_gray, size)
         previous_small = cv2.resize(previous_gray, size)
 
-        # Calculate absolute difference
         diff = cv2.absdiff(current_small, previous_small)
         mean_diff = np.mean(diff)
 
-        # Normalize: a mean diff of 80+ is a major scene change
         score = min(1.0, mean_diff / 80.0)
-
         return score
 
     def analyze_frame(self, frame: np.ndarray) -> tuple[bool, float]:
@@ -220,18 +238,26 @@ class DeathDetector:
         fade_score = self._fade_detection_score(frame)
         scene_change = self._scene_change_score(frame)
 
-        # Weighted combination depends on available data
+        # If template matching finds a strong match, trust it heavily
         if self.templates:
-            # Template matching is most reliable when templates exist
-            confidence = (
-                template_score * 0.40
-                + color_score * 0.15
-                + brightness_score * 0.15
-                + fade_score * 0.15
-                + scene_change * 0.15
-            )
+            if template_score > 0.75:
+                # Strong template match — weight it very high
+                confidence = (
+                    template_score * 0.60
+                    + color_score * 0.10
+                    + brightness_score * 0.10
+                    + fade_score * 0.10
+                    + scene_change * 0.10
+                )
+            else:
+                confidence = (
+                    template_score * 0.35
+                    + color_score * 0.15
+                    + brightness_score * 0.15
+                    + fade_score * 0.20
+                    + scene_change * 0.15
+                )
         else:
-            # Without templates, rely more on color/brightness
             confidence = (
                 color_score * 0.30
                 + brightness_score * 0.25
