@@ -88,6 +88,23 @@ class DeathDetector:
         y2 = int(region.y_max * h)
         return frame[y1:y2, x1:x2]
 
+    def _compute_scales(
+        self, tmpl_w: int, tmpl_h: int, frame_w: int, frame_h: int
+    ) -> list[float]:
+        """Build the list of scales to try, including auto-fit for oversized templates."""
+        scales = list(SEARCH_SCALES)
+
+        # If the template is close to or larger than the frame, add fit scales
+        if tmpl_w > frame_w * 0.7 or tmpl_h > frame_h * 0.7:
+            fit_w = (frame_w * 0.8) / tmpl_w
+            fit_h = (frame_h * 0.8) / tmpl_h
+            fit = min(fit_w, fit_h)
+            for s in [fit, fit * 0.75, fit * 0.5]:
+                if 0.05 < s < 3.0 and s not in scales:
+                    scales.append(round(s, 4))
+
+        return scales
+
     def _template_match_score(self, frame: np.ndarray) -> float:
         """
         Slide each template across the frame at multiple scales.
@@ -104,8 +121,9 @@ class DeathDetector:
 
         for template in self.templates:
             tmpl_h, tmpl_w = template.shape[:2]
+            scales = self._compute_scales(tmpl_w, tmpl_h, frame_w, frame_h)
 
-            for scale in SEARCH_SCALES:
+            for scale in scales:
                 # Resize template to this scale
                 new_w = int(tmpl_w * scale)
                 new_h = int(tmpl_h * scale)
@@ -238,32 +256,37 @@ class DeathDetector:
         fade_score = self._fade_detection_score(frame)
         scene_change = self._scene_change_score(frame)
 
-        # If template matching finds a strong match, trust it heavily
-        if self.templates:
-            if template_score > 0.75:
-                # Strong template match — weight it very high
-                confidence = (
-                    template_score * 0.60
-                    + color_score * 0.10
-                    + brightness_score * 0.10
-                    + fade_score * 0.10
-                    + scene_change * 0.10
-                )
-            else:
-                confidence = (
-                    template_score * 0.35
-                    + color_score * 0.15
-                    + brightness_score * 0.15
-                    + fade_score * 0.20
-                    + scene_change * 0.15
-                )
-        else:
+        # Compute base confidence from persistent signals (things that stay
+        # true for every frame of a death screen, not just the transition).
+        if self.templates and template_score > 0.75:
+            # Strong template match — trust it heavily
             confidence = (
-                color_score * 0.30
-                + brightness_score * 0.25
-                + fade_score * 0.25
-                + scene_change * 0.20
+                template_score * 0.65
+                + color_score * 0.10
+                + brightness_score * 0.10
+                + fade_score * 0.15
             )
+        elif self.templates and template_score > 0.40:
+            # Moderate template match — balanced
+            confidence = (
+                template_score * 0.40
+                + color_score * 0.20
+                + brightness_score * 0.15
+                + fade_score * 0.25
+            )
+        else:
+            # No templates or template match too weak — visual signals only
+            confidence = (
+                color_score * 0.35
+                + brightness_score * 0.30
+                + fade_score * 0.35
+            )
+
+        # Scene change is a bonus for transitions, never a penalty.
+        # Death screens persist across multiple frames, so low scene change
+        # on the second/third frame should not drag confidence down.
+        if self.previous_frame is not None and scene_change > 0.3:
+            confidence = min(1.0, confidence + scene_change * 0.05)
 
         self.previous_frame = frame.copy()
 
