@@ -1,0 +1,152 @@
+# Twitch Death Counter Bot
+
+A Python bot that watches a Twitch stream, detects death screens from popular games using image analysis, and tracks death counts in chat.
+
+## Features
+
+- **Image-based death detection** using OpenCV template matching, color analysis, brightness detection, and scene change detection
+- **Per-session and all-time tracking** with persistent JSON storage
+- **Twitch chat integration** with commands for viewers to check death counts
+- **Pre-built game profiles** for Elden Ring, Dark Souls II, Dark Souls III, Sekiro, Hollow Knight, and Celeste
+- **Generic profile** for any game with dark/fade-to-black death screens
+- **Template creator tool** to build reference images from VODs or local video
+
+## Requirements
+
+- Python 3.10+
+- [FFmpeg](https://ffmpeg.org/) installed and on your PATH
+- [Streamlink](https://streamlink.github.io/) (installed via pip)
+- A Twitch bot account with an OAuth token
+
+## Setup
+
+1. **Clone and install dependencies:**
+
+```bash
+git clone https://github.com/your-repo/Twitch-Death-Bot.git
+cd Twitch-Death-Bot
+pip install -r requirements.txt
+```
+
+2. **Configure the bot:**
+
+```bash
+cp config.example.env .env
+```
+
+Edit `.env` with your Twitch credentials and settings:
+
+```
+TWITCH_TOKEN=oauth:your_token_here
+TWITCH_CHANNEL=target_channel_name
+GAME_PROFILE=elden_ring
+```
+
+Get a Twitch OAuth token at https://twitchtokengenerator.com
+
+3. **Create death screen templates (recommended):**
+
+For best detection accuracy, capture reference screenshots of the death screen from the game you're tracking. Use the built-in tool:
+
+```bash
+# From a local video file
+python tools/create_templates.py --source gameplay.mp4 --game elden_ring
+
+# From a Twitch VOD
+python tools/create_templates.py --source https://twitch.tv/videos/12345 --game dark_souls_3
+```
+
+Press `S` when you see a death screen to save it as a template. The more templates you provide, the better the detection.
+
+Templates are saved to `game_profiles/templates/<game>/`.
+
+4. **Run the bot:**
+
+```bash
+python main.py
+```
+
+## Chat Commands
+
+| Command | Description |
+|---------|-------------|
+| `!deaths` | Deaths this stream session |
+| `!totaldeaths` | All-time death count |
+| `!deathstats` | Full statistics breakdown |
+| `!game` | Show which game is being tracked |
+
+## Supported Games
+
+| Profile | Game | Detection Method |
+|---------|------|-----------------|
+| `elden_ring` | Elden Ring | Dark screen + red "YOU DIED" text |
+| `dark_souls_2` | Dark Souls II | Dark screen + "YOU DIED" text |
+| `dark_souls_3` | Dark Souls III | Dark screen + red "YOU DIED" text |
+| `sekiro` | Sekiro: Shadows Die Twice | Dark screen + red kanji |
+| `hollow_knight` | Hollow Knight | Screen fade to black |
+| `celeste` | Celeste | White screen flash |
+| `generic` | Any game | Dark fade + red tint |
+
+## How Detection Works
+
+The bot combines multiple detection strategies with weighted scoring:
+
+1. **Template Matching** (40% weight when templates exist): Compares the current frame against saved reference death screen images using structural similarity (SSIM) and normalized cross-correlation.
+
+2. **Color Analysis** (15-30%): Checks what percentage of pixels fall within the game's known death screen color ranges (e.g., dark background + red text for Souls games).
+
+3. **Brightness Analysis** (15-25%): Measures overall frame brightness. Death screens in most games are significantly darker or brighter than normal gameplay.
+
+4. **Fade Detection** (15-25%): Checks if the screen has faded to the death color (usually black).
+
+5. **Scene Change Detection** (15-20%): Detects sudden changes between frames that may indicate a death transition.
+
+A death is only confirmed after **2 consecutive frames** exceed the confidence threshold, reducing false positives.
+
+## Configuration Reference
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `TWITCH_TOKEN` | (required) | Bot OAuth token |
+| `TWITCH_CHANNEL` | (required) | Channel to monitor |
+| `GAME_PROFILE` | `generic` | Game profile for detection |
+| `CAPTURE_INTERVAL` | `2.0` | Seconds between frame captures |
+| `DETECTION_THRESHOLD` | `0.80` | Confidence threshold (0.0 - 1.0) |
+| `DEATH_COOLDOWN` | `15` | Seconds between death detections |
+| `STREAM_QUALITY` | `720p` | Stream quality for capture |
+
+## Adding a New Game
+
+1. Add a `GameProfile` in `game_profiles/profiles.py` with the game's death screen characteristics
+2. Register it in the `PROFILES` dict
+3. Create a template directory: `mkdir game_profiles/templates/your_game`
+4. Use the template creator to capture reference death screens
+5. Set `GAME_PROFILE=your_game` in `.env`
+
+## Project Structure
+
+```
+Twitch-Death-Bot/
+├── main.py                          # Entry point
+├── requirements.txt
+├── config.example.env
+├── bot/
+│   └── twitch_bot.py                # Twitch chat bot and commands
+├── detection/
+│   ├── detector.py                  # Death screen detection engine
+│   ├── stream_capture.py            # Twitch stream frame capture
+│   └── counter.py                   # Death counter with persistence
+├── game_profiles/
+│   ├── profiles.py                  # Game-specific detection profiles
+│   └── templates/                   # Reference death screen images
+│       ├── elden_ring/
+│       ├── dark_souls_2/
+│       ├── dark_souls_3/
+│       ├── sekiro/
+│       ├── hollow_knight/
+│       └── celeste/
+├── tools/
+│   └── create_templates.py          # Template image creator utility
+└── data/
+    └── deaths.json                  # Persistent death count storage
+```
