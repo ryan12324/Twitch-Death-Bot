@@ -365,6 +365,7 @@
   <a href="/" class="nav-link">Home</a>
   <a href="/test" class="nav-link active">Test</a>
   <span class="status-badge offline" id="statusBadge">Offline</span>
+  <span class="frame-counter" id="templateCount" style="margin-left:8px"></span>
   <div style="flex:1"></div>
   <span class="frame-counter" id="frameCounter"></span>
 </div>
@@ -531,6 +532,13 @@ async function startDetection() {
     return;
   }
 
+  // Show template count
+  const tmpl = data.templates_loaded || 0;
+  document.getElementById('templateCount').textContent = tmpl > 0
+    ? tmpl + ' template(s) loaded'
+    : 'No templates loaded (detection uses color/brightness only)';
+  document.getElementById('templateCount').style.color = tmpl > 0 ? '#00c853' : '#ffc107';
+
   // Show video feed
   document.getElementById('placeholder').style.display = 'none';
   document.getElementById('videoFeed').style.display = 'block';
@@ -584,8 +592,13 @@ async function pollStatus() {
     document.getElementById('sessionDeaths').textContent = data.session_deaths || 0;
     document.getElementById('totalDeaths').textContent = (data.total_deaths || 0) + ' all-time';
 
-    // Frame counter
+    // Frame counter + templates
     document.getElementById('frameCounter').textContent = 'Frames: ' + (data.frame_count || 0);
+    const tl = data.templates_loaded || 0;
+    document.getElementById('templateCount').textContent = tl > 0
+      ? tl + ' template(s)'
+      : 'No templates';
+    document.getElementById('templateCount').style.color = tl > 0 ? '#00c853' : '#ffc107';
 
     // Death log
     const log = data.death_log || [];

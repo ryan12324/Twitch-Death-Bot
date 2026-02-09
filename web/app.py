@@ -317,7 +317,12 @@ def api_start():
     t = threading.Thread(target=_detection_thread, daemon=True)
     t.start()
 
-    return jsonify({"status": "started", "channel": channel, "profile": profile_name})
+    return jsonify({
+        "status": "started",
+        "channel": channel,
+        "profile": profile_name,
+        "templates_loaded": len(detector.templates),
+    })
 
 
 @app.route("/api/stop", methods=["POST"])
@@ -331,6 +336,7 @@ def api_stop():
 def api_status():
     """Return current detection status, scores, and death log."""
     with state_lock:
+        templates_loaded = len(state["detector"].templates) if state["detector"] else 0
         return jsonify({
             "running": state["running"],
             "profile": state["profile_name"],
@@ -341,6 +347,7 @@ def api_status():
             "total_deaths": state["counter"].total_deaths,
             "death_log": state["death_log"][-50:],
             "frame_count": state["frame_count"],
+            "templates_loaded": templates_loaded,
         })
 
 
