@@ -46,6 +46,9 @@ class DeathDetector:
         self.death_frame_count: int = 0
         self.required_consecutive: int = 2
 
+        # Last computed individual scores (populated by analyze_frame)
+        self.last_scores: dict[str, float] = {}
+
         self._load_templates()
 
     def _load_templates(self) -> None:
@@ -287,6 +290,16 @@ class DeathDetector:
         # on the second/third frame should not drag confidence down.
         if self.previous_frame is not None and scene_change > 0.3:
             confidence = min(1.0, confidence + scene_change * 0.05)
+
+        # Store individual scores for the web GUI
+        self.last_scores = {
+            "template": round(template_score, 4),
+            "color": round(color_score, 4),
+            "brightness": round(brightness_score, 4),
+            "fade": round(fade_score, 4),
+            "scene_change": round(scene_change, 4),
+            "confidence": round(confidence, 4),
+        }
 
         self.previous_frame = frame.copy()
 

@@ -69,37 +69,15 @@ def _encode_frame_jpg(frame: np.ndarray, quality: int = 70) -> bytes:
     return buf.tobytes()
 
 
-def _analyze_frame_detailed(detector: DeathDetector, frame: np.ndarray) -> dict:
-    """Run all detector strategies and return individual scores."""
-    template = detector._template_match_score(frame)
-    color = detector._color_analysis_score(frame)
-    brightness = detector._brightness_score(frame)
-    fade = detector._fade_detection_score(frame)
-    scene = detector._scene_change_score(frame)
-
-    if detector.templates:
-        confidence = (
-            template * 0.40
-            + color * 0.15
-            + brightness * 0.15
-            + fade * 0.15
-            + scene * 0.15
-        )
-    else:
-        confidence = (
-            color * 0.30
-            + brightness * 0.25
-            + fade * 0.25
-            + scene * 0.20
-        )
-
-    return {
-        "template": round(template, 4),
-        "color": round(color, 4),
-        "brightness": round(brightness, 4),
-        "fade": round(fade, 4),
-        "scene_change": round(scene, 4),
-        "confidence": round(confidence, 4),
+def _get_scores(detector: DeathDetector) -> dict:
+    """Return the individual scores from the detector's last analyze_frame call."""
+    return detector.last_scores or {
+        "template": 0.0,
+        "color": 0.0,
+        "brightness": 0.0,
+        "fade": 0.0,
+        "scene_change": 0.0,
+        "confidence": 0.0,
     }
 
 
@@ -132,8 +110,8 @@ def _detection_thread():
             time.sleep(0.2)
             continue
 
-        scores = _analyze_frame_detailed(detector, frame)
         is_death, confidence = detector.analyze_frame(frame)
+        scores = _get_scores(detector)
 
         # Draw detection overlay on the frame
         display = frame.copy()
@@ -382,10 +360,9 @@ def api_analyze_image():
 
     profile = get_profile(profile_name)
     detector = DeathDetector(profile=profile, threshold=threshold, cooldown=0)
-    # Feed twice to satisfy consecutive frame requirement
-    detector.analyze_frame(frame)
-    scores = _analyze_frame_detailed(detector, frame)
+    detector.required_consecutive = 1  # single image, no consecutive needed
     is_death, confidence = detector.analyze_frame(frame)
+    scores = _get_scores(detector)
 
     return jsonify({
         "is_death": is_death,
