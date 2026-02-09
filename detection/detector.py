@@ -24,6 +24,7 @@ from game_profiles.profiles import GameProfile, ScreenRegion
 logger = logging.getLogger(__name__)
 
 TEMPLATES_DIR = Path(__file__).parent.parent / "game_profiles" / "templates"
+logger.info("TEMPLATES_DIR resolved to: %s (exists=%s)", TEMPLATES_DIR, TEMPLATES_DIR.exists())
 
 # Scales to try when searching for a template in the frame.
 # Wide range covers high-res templates matched against lower-res frames.
@@ -54,11 +55,21 @@ class DeathDetector:
         # Last computed individual scores (populated by analyze_frame)
         self.last_scores: dict[str, float] = {}
 
+        logger.info(
+            "DeathDetector init: profile=%s threshold=%.2f cooldown=%d "
+            "required_consecutive=%d",
+            profile.display_name, threshold, self.cooldown, required_consecutive,
+        )
+
         self._load_templates()
 
     def _load_templates(self) -> None:
         """Load reference template images (sub-images to search for)."""
         template_path = TEMPLATES_DIR / self.profile.template_dir
+        logger.info(
+            "Looking for templates in: %s (exists=%s)",
+            template_path, template_path.exists(),
+        )
         if not template_path.exists():
             logger.warning(
                 "No template directory at %s — template matching disabled.",
@@ -66,7 +77,13 @@ class DeathDetector:
             )
             return
 
-        for img_file in sorted(template_path.iterdir()):
+        files_found = list(sorted(template_path.iterdir()))
+        logger.info(
+            "Files in template dir: %s",
+            [f.name for f in files_found],
+        )
+
+        for img_file in files_found:
             if img_file.suffix.lower() in (".png", ".jpg", ".jpeg", ".bmp"):
                 img = cv2.imread(str(img_file))
                 if img is not None:
@@ -77,6 +94,11 @@ class DeathDetector:
                         img_file.name,
                         gray.shape[1],
                         gray.shape[0],
+                    )
+                else:
+                    logger.error(
+                        "FAILED to load template (cv2.imread returned None): %s",
+                        img_file,
                     )
 
         logger.info(
@@ -111,6 +133,10 @@ class DeathDetector:
                 if 0.05 < s < 3.0 and s not in scales:
                     scales.append(round(s, 4))
 
+        logger.debug(
+            "Scales for template %dx%d in frame %dx%d: %s",
+            tmpl_w, tmpl_h, frame_w, frame_h, scales,
+        )
         return scales
 
     def _template_match_score(self, frame: np.ndarray) -> float:
@@ -125,25 +151,40 @@ class DeathDetector:
         background pixels change depending on where you die.
         """
         if not self.templates:
+            logger.info("template_match: no templates loaded, returning 0.0")
             return 0.0
 
         frame_gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
         frame_h, frame_w = frame_gray.shape[:2]
         frame_edges = cv2.Canny(frame_gray, 50, 150)
 
+        logger.info("template_match: frame=%dx%d, %d template(s)", frame_w, frame_h, len(self.templates))
+
         best_score = 0.0
 
-        for template in self.templates:
+        for t_idx, template in enumerate(self.templates):
             tmpl_h, tmpl_w = template.shape[:2]
             scales = self._compute_scales(tmpl_w, tmpl_h, frame_w, frame_h)
+            logger.info(
+                "template_match: template[%d] %dx%d, trying %d scales: %s",
+                t_idx, tmpl_w, tmpl_h, len(scales), scales,
+            )
 
             for scale in scales:
                 new_w = int(tmpl_w * scale)
                 new_h = int(tmpl_h * scale)
 
                 if new_w >= frame_w or new_h >= frame_h:
+                    logger.debug(
+                        "  scale=%.4f -> %dx%d SKIPPED (too large for %dx%d frame)",
+                        scale, new_w, new_h, frame_w, frame_h,
+                    )
                     continue
                 if new_w < 10 or new_h < 10:
+                    logger.debug(
+                        "  scale=%.4f -> %dx%d SKIPPED (too small)",
+                        scale, new_w, new_h,
+                    )
                     continue
 
                 scaled = cv2.resize(template, (new_w, new_h))
@@ -159,7 +200,13 @@ class DeathDetector:
                         if area_g.shape[0] > new_h and area_g.shape[1] > new_w:
                             search_areas_gray.append(area_g)
                             search_areas_edge.append(area_e)
+                        else:
+                            logger.debug(
+                                "  scale=%.4f region too small (%dx%d) for template %dx%d",
+                                scale, area_g.shape[1], area_g.shape[0], new_w, new_h,
+                            )
 
+                using_regions = len(search_areas_gray) > 0
                 if not search_areas_gray:
                     search_areas_gray = [frame_gray]
                     search_areas_edge = [frame_edges]
@@ -169,36 +216,55 @@ class DeathDetector:
                     result = cv2.matchTemplate(
                         area_g, scaled, cv2.TM_CCOEFF_NORMED
                     )
-                    _, max_val, _, _ = cv2.minMaxLoc(result)
-                    best_score = max(best_score, max_val)
+                    _, max_val, _, max_loc = cv2.minMaxLoc(result)
 
                     # Edge-based match — robust to background changes
                     result_e = cv2.matchTemplate(
                         area_e, scaled_edges, cv2.TM_CCOEFF_NORMED
                     )
-                    _, max_val_e, _, _ = cv2.minMaxLoc(result_e)
-                    best_score = max(best_score, max_val_e)
+                    _, max_val_e, _, max_loc_e = cv2.minMaxLoc(result_e)
+
+                    logger.info(
+                        "  scale=%.4f -> %dx%d | area=%dx%d region=%s | "
+                        "pixel=%.4f@(%d,%d) edge=%.4f@(%d,%d) | best=%.4f",
+                        scale, new_w, new_h,
+                        area_g.shape[1], area_g.shape[0],
+                        using_regions,
+                        max_val, max_loc[0], max_loc[1],
+                        max_val_e, max_loc_e[0], max_loc_e[1],
+                        best_score,
+                    )
+
+                    best_score = max(best_score, max_val, max_val_e)
 
                     if best_score > 0.85:
+                        logger.info("  EARLY EXIT: best_score=%.4f > 0.85", best_score)
                         return best_score
 
+        logger.info("template_match: final best_score=%.4f", best_score)
         return best_score
 
     def _color_analysis_score(self, frame: np.ndarray) -> float:
         """Score based on how much of the frame matches death screen colors."""
         if not self.profile.dominant_colors:
+            logger.info("color_analysis: no dominant_colors in profile, returning 0.0")
             return 0.0
 
         total_pixels = frame.shape[0] * frame.shape[1]
         max_ratio = 0.0
 
-        for color_range in self.profile.dominant_colors:
+        for i, color_range in enumerate(self.profile.dominant_colors):
             lower = np.array(color_range.lower, dtype=np.uint8)
             upper = np.array(color_range.upper, dtype=np.uint8)
             mask = cv2.inRange(frame, lower, upper)
             ratio = np.count_nonzero(mask) / total_pixels
+            logger.info(
+                "color_analysis: range[%d] BGR(%s)-(%s) -> ratio=%.4f",
+                i, color_range.lower, color_range.upper, ratio,
+            )
             max_ratio = max(max_ratio, ratio)
 
+        logger.info("color_analysis: final score=%.4f", max_ratio)
         return max_ratio
 
     def _brightness_score(self, frame: np.ndarray) -> float:
@@ -214,19 +280,40 @@ class DeathDetector:
                     score,
                     1.0 - (mean_brightness / self.profile.max_brightness),
                 )
+                logger.info(
+                    "brightness: mean=%.1f <= max_thresh=%d -> score=%.4f",
+                    mean_brightness, self.profile.max_brightness, score,
+                )
+            else:
+                logger.info(
+                    "brightness: mean=%.1f > max_thresh=%d -> no match",
+                    mean_brightness, self.profile.max_brightness,
+                )
 
         if self.profile.min_brightness is not None:
             if mean_brightness >= self.profile.min_brightness:
-                score = max(
-                    score,
-                    min(1.0, mean_brightness / 255.0),
+                new_score = min(1.0, mean_brightness / 255.0)
+                score = max(score, new_score)
+                logger.info(
+                    "brightness: mean=%.1f >= min_thresh=%d -> score=%.4f",
+                    mean_brightness, self.profile.min_brightness, score,
+                )
+            else:
+                logger.info(
+                    "brightness: mean=%.1f < min_thresh=%d -> no match",
+                    mean_brightness, self.profile.min_brightness,
                 )
 
+        if self.profile.max_brightness is None and self.profile.min_brightness is None:
+            logger.info("brightness: no thresholds in profile, returning 0.0")
+
+        logger.info("brightness: final score=%.4f (mean=%.1f)", score, mean_brightness)
         return score
 
     def _fade_detection_score(self, frame: np.ndarray) -> float:
         """Detect if the screen has faded to the death color."""
         if self.profile.fade_to_color is None:
+            logger.info("fade: no fade_to_color in profile, returning 0.0")
             return 0.0
 
         lower = np.array(self.profile.fade_to_color.lower, dtype=np.uint8)
@@ -237,12 +324,22 @@ class DeathDetector:
         fade_ratio = np.count_nonzero(mask) / total_pixels
 
         if fade_ratio > 0.85:
-            return fade_ratio
-        return fade_ratio * 0.5
+            score = fade_ratio
+        else:
+            score = fade_ratio * 0.5
+
+        logger.info(
+            "fade: BGR(%s)-(%s) -> ratio=%.4f, score=%.4f",
+            self.profile.fade_to_color.lower,
+            self.profile.fade_to_color.upper,
+            fade_ratio, score,
+        )
+        return score
 
     def _scene_change_score(self, frame: np.ndarray) -> float:
         """Detect sudden scene changes that may indicate death."""
         if self.previous_frame is None:
+            logger.info("scene_change: no previous frame, returning 0.0")
             return 0.0
 
         current_gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
@@ -256,6 +353,7 @@ class DeathDetector:
         mean_diff = np.mean(diff)
 
         score = min(1.0, mean_diff / 80.0)
+        logger.info("scene_change: mean_diff=%.1f -> score=%.4f", mean_diff, score)
         return score
 
     @staticmethod
@@ -263,7 +361,12 @@ class DeathDetector:
         """Resize frame to a consistent working resolution."""
         h, w = frame.shape[:2]
         if w != WORKING_W or h != WORKING_H:
+            logger.info(
+                "normalize: %dx%d -> %dx%d",
+                w, h, WORKING_W, WORKING_H,
+            )
             return cv2.resize(frame, (WORKING_W, WORKING_H))
+        logger.debug("normalize: already %dx%d, no resize", w, h)
         return frame
 
     def analyze_frame(self, frame: np.ndarray) -> tuple[bool, float]:
@@ -273,11 +376,16 @@ class DeathDetector:
         Returns:
             (is_death, confidence) - whether death was detected and confidence 0-1
         """
+        logger.info(
+            "=== analyze_frame START === input=%dx%d profile=%s",
+            frame.shape[1], frame.shape[0], self.profile.name,
+        )
         frame = self._normalize_frame(frame)
         now = time.time()
 
         # Check cooldown
         if now - self.last_detection_time < self.cooldown:
+            logger.info("analyze_frame: in cooldown, skipping")
             self.previous_frame = frame.copy()
             return False, 0.0
 
@@ -291,7 +399,7 @@ class DeathDetector:
         # Compute base confidence from persistent signals (things that stay
         # true for every frame of a death screen, not just the transition).
         if self.templates and template_score > 0.75:
-            # Strong template match — trust it heavily
+            weight_tier = "STRONG_TEMPLATE"
             confidence = (
                 template_score * 0.65
                 + color_score * 0.10
@@ -299,7 +407,7 @@ class DeathDetector:
                 + fade_score * 0.15
             )
         elif self.templates and template_score > 0.40:
-            # Moderate template match — balanced
+            weight_tier = "MODERATE_TEMPLATE"
             confidence = (
                 template_score * 0.40
                 + color_score * 0.20
@@ -307,18 +415,28 @@ class DeathDetector:
                 + fade_score * 0.25
             )
         else:
-            # No templates or template match too weak — visual signals only
+            weight_tier = "VISUAL_ONLY"
             confidence = (
                 color_score * 0.35
                 + brightness_score * 0.30
                 + fade_score * 0.35
             )
 
+        logger.info(
+            "weighting: tier=%s templates_loaded=%d template_score=%.4f",
+            weight_tier, len(self.templates), template_score,
+        )
+
         # Scene change is a bonus for transitions, never a penalty.
         # Death screens persist across multiple frames, so low scene change
         # on the second/third frame should not drag confidence down.
         if self.previous_frame is not None and scene_change > 0.3:
+            old_conf = confidence
             confidence = min(1.0, confidence + scene_change * 0.05)
+            logger.info(
+                "scene bonus: %.4f -> %.4f (scene=%.4f)",
+                old_conf, confidence, scene_change,
+            )
 
         # Store individual scores for the web GUI
         self.last_scores = {
@@ -339,6 +457,15 @@ class DeathDetector:
             self.death_frame_count = 0
 
         is_death = self.death_frame_count >= self.required_consecutive
+
+        logger.info(
+            "=== analyze_frame END === confidence=%.4f threshold=%.2f "
+            "consecutive=%d/%d is_death=%s | "
+            "template=%.4f color=%.4f brightness=%.4f fade=%.4f scene=%.4f",
+            confidence, self.threshold,
+            self.death_frame_count, self.required_consecutive, is_death,
+            template_score, color_score, brightness_score, fade_score, scene_change,
+        )
 
         if is_death:
             self.last_detection_time = now

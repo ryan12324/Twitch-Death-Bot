@@ -345,18 +345,29 @@ def api_threshold():
 def api_analyze_image():
     """Analyze a single uploaded image for death detection."""
     if "image" not in request.files:
+        logger.warning("analyze_image: no 'image' in request.files")
         return jsonify({"error": "No image uploaded"}), 400
 
     file = request.files["image"]
     img_bytes = file.read()
+    logger.info(
+        "analyze_image: received file=%s size=%d bytes",
+        file.filename, len(img_bytes),
+    )
     nparr = np.frombuffer(img_bytes, np.uint8)
     frame = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
 
     if frame is None:
+        logger.error("analyze_image: cv2.imdecode returned None")
         return jsonify({"error": "Could not decode image"}), 400
 
     profile_name = request.form.get("profile", "generic")
     threshold = float(request.form.get("threshold", 0.80))
+
+    logger.info(
+        "analyze_image: decoded %dx%d profile=%s threshold=%.2f",
+        frame.shape[1], frame.shape[0], profile_name, threshold,
+    )
 
     profile = get_profile(profile_name)
     detector = DeathDetector(
@@ -364,6 +375,11 @@ def api_analyze_image():
     )
     is_death, confidence = detector.analyze_frame(frame)
     scores = _get_scores(detector)
+
+    logger.info(
+        "analyze_image: RESULT is_death=%s confidence=%.4f templates_loaded=%d scores=%s",
+        is_death, confidence, len(detector.templates), scores,
+    )
 
     return jsonify({
         "is_death": is_death,
