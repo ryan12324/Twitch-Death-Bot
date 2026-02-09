@@ -36,6 +36,7 @@ class DeathDetector:
         profile: GameProfile,
         threshold: float = 0.80,
         cooldown: int = 15,
+        required_consecutive: int = 2,
     ):
         self.profile = profile
         self.threshold = threshold
@@ -44,7 +45,7 @@ class DeathDetector:
         self.last_detection_time: float = 0.0
         self.previous_frame: np.ndarray | None = None
         self.death_frame_count: int = 0
-        self.required_consecutive: int = 2
+        self.required_consecutive: int = required_consecutive
 
         # Last computed individual scores (populated by analyze_frame)
         self.last_scores: dict[str, float] = {}

@@ -359,8 +359,9 @@ def api_analyze_image():
     threshold = float(request.form.get("threshold", 0.80))
 
     profile = get_profile(profile_name)
-    detector = DeathDetector(profile=profile, threshold=threshold, cooldown=0)
-    detector.required_consecutive = 1  # single image, no consecutive needed
+    detector = DeathDetector(
+        profile=profile, threshold=threshold, cooldown=0, required_consecutive=1,
+    )
     is_death, confidence = detector.analyze_frame(frame)
     scores = _get_scores(detector)
 
