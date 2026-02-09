@@ -1,0 +1,11 @@
+.git
+.env
+__pycache__
+*.pyc
+venv
+.venv
+clips
+data/deaths.json
+.idea
+.vscode
+captures

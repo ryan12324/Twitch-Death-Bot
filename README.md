@@ -10,6 +10,8 @@ A Python bot that watches a Twitch stream, detects death screens from popular ga
 - **Pre-built game profiles** for Elden Ring, Dark Souls II, Dark Souls III, Sekiro, Hollow Knight, and Celeste
 - **Generic profile** for any game with dark/fade-to-black death screens
 - **Death clip recording** saves a short video clip around every death for easy compilation
+- **Web testing GUI** to test detection against live streams with real-time score visualization
+- **Docker + Coolify ready** for one-click self-hosted deployment
 - **Template creator tool** to build reference images from VODs or local video
 
 ## Requirements
@@ -121,6 +123,8 @@ A death is only confirmed after **2 consecutive frames** exceed the confidence t
 | `CLIP_POST_DEATH_SECONDS` | `2.0` | Seconds of footage after the death |
 | `CLIP_OUTPUT_FPS` | `10.0` | Playback FPS for saved clips |
 | `CLIP_OUTPUT_DIR` | `clips/` | Directory for saved death clips |
+| `WEB_PORT` | `8080` | Port for the web testing GUI |
+| `WEB_DEBUG` | `false` | Flask debug mode (auto-reload) |
 
 ## Adding a New Game
 
@@ -153,8 +157,14 @@ Twitch-Death-Bot/
 │       ├── sekiro/
 │       ├── hollow_knight/
 │       └── celeste/
+├── web/
+│   ├── app.py                       # Flask web testing GUI
+│   └── templates/index.html         # Dashboard frontend
 ├── tools/
 │   └── create_templates.py          # Template image creator utility
+├── Dockerfile                       # Docker build for Coolify
+├── docker-compose.yml               # Bot + web GUI services
+├── coolify.json                     # Coolify service template
 ├── clips/                           # Saved death clips (gitignored)
 └── data/
     └── deaths.json                  # Persistent death count storage
@@ -180,3 +190,63 @@ ffmpeg -f concat -safe 0 -i clips/list.txt -c copy death_compilation.mp4
 ```
 
 Set `CLIP_ENABLED=false` in `.env` to disable clip recording and save disk space.
+
+## Testing GUI
+
+A browser-based dashboard for testing detection against any live stream. Lets you tune settings in real time without touching the bot's Twitch chat connection.
+
+### Run locally
+
+```bash
+python web/app.py
+```
+
+Open `http://localhost:8080`. From the dashboard you can:
+
+- **Connect to any Twitch stream** by channel name
+- **Watch live detection** with per-strategy score bars overlaid on the video
+- **Adjust the confidence threshold** with a slider and see the effect immediately
+- **Upload a screenshot** to test detection on a single image
+- **View the death log** with timestamps and confidence values
+
+### Run with Docker
+
+```bash
+docker compose up web
+```
+
+The GUI is available at `http://localhost:8080`.
+
+## Deploying to Coolify
+
+This project is ready for [Coolify](https://coolify.io/) self-hosted deployment.
+
+### Option 1: Docker Compose (recommended)
+
+1. In Coolify, create a new service and select **Docker Compose**
+2. Point it at this repository
+3. Add your `.env` variables in Coolify's environment settings:
+   - `TWITCH_TOKEN`
+   - `TWITCH_CHANNEL`
+   - `GAME_PROFILE`
+   - Any other overrides from the config reference
+4. Deploy — Coolify will build and start both the `bot` and `web` services
+5. Map a domain to the `web` service (port 8080) for the testing GUI
+
+### Option 2: Single service (bot only or web only)
+
+1. In Coolify, create a new service and select **Dockerfile**
+2. Point it at this repo
+3. Set the `MODE` environment variable:
+   - `MODE=bot` — runs the Twitch chat bot with detection (default)
+   - `MODE=web` — runs only the web testing GUI
+4. For the web GUI, expose port `8080`
+5. Add the rest of your `.env` variables
+
+### Persistent storage
+
+Map Docker volumes so death data and clips survive redeployments:
+
+- `/app/data` — death counter JSON (session history, all-time stats)
+- `/app/clips` — saved death clip videos
+- `/app/game_profiles/templates` — your reference template images

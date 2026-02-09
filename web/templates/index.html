@@ -1,0 +1,649 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Death Detector - Testing GUI</title>
+<style>
+  :root {
+    --bg: #0e0e10;
+    --surface: #18181b;
+    --surface2: #1f1f23;
+    --border: #2f2f35;
+    --text: #efeff1;
+    --text-dim: #adadb8;
+    --accent: #9147ff;
+    --accent-hover: #772ce8;
+    --red: #ff4444;
+    --green: #00c853;
+    --yellow: #ffc107;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    min-height: 100vh;
+  }
+
+  /* Header */
+  .header {
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+    padding: 12px 24px;
+    display: flex;
+    align-items: center;
+    gap: 16px;
+  }
+  .header h1 { font-size: 18px; font-weight: 600; }
+  .header .status-badge {
+    padding: 4px 12px;
+    border-radius: 12px;
+    font-size: 12px;
+    font-weight: 600;
+    text-transform: uppercase;
+  }
+  .status-badge.offline { background: var(--surface2); color: var(--text-dim); }
+  .status-badge.live { background: var(--red); color: white; }
+
+  /* Layout */
+  .main {
+    display: grid;
+    grid-template-columns: 1fr 360px;
+    gap: 0;
+    height: calc(100vh - 53px);
+  }
+
+  /* Video area */
+  .video-area {
+    display: flex;
+    flex-direction: column;
+    background: #000;
+    position: relative;
+  }
+  .video-area img {
+    width: 100%;
+    height: 100%;
+    object-fit: contain;
+  }
+  .video-placeholder {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    height: 100%;
+    color: var(--text-dim);
+    font-size: 16px;
+    flex-direction: column;
+    gap: 12px;
+  }
+
+  /* Death counter overlay */
+  .death-overlay {
+    position: absolute;
+    top: 16px;
+    left: 16px;
+    background: rgba(0,0,0,0.8);
+    border: 2px solid var(--red);
+    border-radius: 12px;
+    padding: 12px 20px;
+    text-align: center;
+    min-width: 120px;
+  }
+  .death-overlay .count {
+    font-size: 48px;
+    font-weight: 700;
+    color: var(--red);
+    line-height: 1;
+  }
+  .death-overlay .label {
+    font-size: 11px;
+    color: var(--text-dim);
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    margin-top: 4px;
+  }
+  .death-overlay .total {
+    font-size: 13px;
+    color: var(--text-dim);
+    margin-top: 8px;
+    border-top: 1px solid var(--border);
+    padding-top: 8px;
+  }
+
+  /* Sidebar */
+  .sidebar {
+    background: var(--surface);
+    border-left: 1px solid var(--border);
+    display: flex;
+    flex-direction: column;
+    overflow-y: auto;
+  }
+
+  .panel {
+    padding: 16px;
+    border-bottom: 1px solid var(--border);
+  }
+  .panel h2 {
+    font-size: 13px;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    color: var(--text-dim);
+    margin-bottom: 12px;
+  }
+
+  /* Form controls */
+  .form-row {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    margin-bottom: 12px;
+  }
+  .form-row label {
+    font-size: 12px;
+    color: var(--text-dim);
+    font-weight: 500;
+  }
+  .form-row input, .form-row select {
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 8px 12px;
+    color: var(--text);
+    font-size: 14px;
+    outline: none;
+  }
+  .form-row input:focus, .form-row select:focus {
+    border-color: var(--accent);
+  }
+
+  .btn {
+    padding: 10px 20px;
+    border: none;
+    border-radius: 6px;
+    font-size: 14px;
+    font-weight: 600;
+    cursor: pointer;
+    width: 100%;
+    transition: background 0.15s;
+  }
+  .btn-primary { background: var(--accent); color: white; }
+  .btn-primary:hover { background: var(--accent-hover); }
+  .btn-danger { background: var(--red); color: white; }
+  .btn-danger:hover { background: #e03030; }
+  .btn-secondary { background: var(--surface2); color: var(--text); border: 1px solid var(--border); }
+  .btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+  .btn-row { display: flex; gap: 8px; }
+  .btn-row .btn { flex: 1; }
+
+  /* Score bars */
+  .score-bar {
+    margin-bottom: 8px;
+  }
+  .score-bar .bar-header {
+    display: flex;
+    justify-content: space-between;
+    font-size: 12px;
+    margin-bottom: 3px;
+  }
+  .score-bar .bar-header .name { color: var(--text-dim); }
+  .score-bar .bar-header .value { font-weight: 600; font-variant-numeric: tabular-nums; }
+  .score-bar .bar-track {
+    background: var(--surface2);
+    height: 8px;
+    border-radius: 4px;
+    overflow: hidden;
+    position: relative;
+  }
+  .score-bar .bar-fill {
+    height: 100%;
+    border-radius: 4px;
+    transition: width 0.3s;
+  }
+  .bar-template .bar-fill { background: #2196f3; }
+  .bar-color .bar-fill { background: #4caf50; }
+  .bar-brightness .bar-fill { background: #ff9800; }
+  .bar-fade .bar-fill { background: #9c27b0; }
+  .bar-scene_change .bar-fill { background: #f44336; }
+  .bar-confidence .bar-fill { background: var(--accent); }
+  .bar-confidence .bar-track { height: 14px; border-radius: 7px; }
+  .bar-confidence .bar-header .value { font-size: 16px; }
+
+  .threshold-marker {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    width: 2px;
+    background: var(--yellow);
+    z-index: 1;
+  }
+
+  /* Threshold slider */
+  .threshold-control {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-top: 12px;
+  }
+  .threshold-control input[type="range"] {
+    flex: 1;
+    accent-color: var(--accent);
+    height: 4px;
+    background: transparent;
+  }
+  .threshold-control .val {
+    font-size: 14px;
+    font-weight: 600;
+    min-width: 44px;
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* Death log */
+  .death-log {
+    max-height: 300px;
+    overflow-y: auto;
+  }
+  .death-log-empty {
+    color: var(--text-dim);
+    font-size: 13px;
+    font-style: italic;
+    padding: 8px 0;
+  }
+  .death-entry {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 8px 0;
+    border-bottom: 1px solid var(--border);
+    font-size: 13px;
+  }
+  .death-entry .num {
+    background: var(--red);
+    color: white;
+    font-weight: 700;
+    min-width: 28px;
+    height: 28px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 12px;
+  }
+  .death-entry .info { flex: 1; }
+  .death-entry .info .conf {
+    color: var(--text-dim);
+    font-size: 11px;
+  }
+  .death-entry .timestamp {
+    color: var(--text-dim);
+    font-size: 12px;
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* Upload area */
+  .upload-zone {
+    border: 2px dashed var(--border);
+    border-radius: 8px;
+    padding: 20px;
+    text-align: center;
+    cursor: pointer;
+    transition: border-color 0.2s;
+    margin-bottom: 12px;
+  }
+  .upload-zone:hover { border-color: var(--accent); }
+  .upload-zone input { display: none; }
+  .upload-zone p { color: var(--text-dim); font-size: 13px; }
+
+  .upload-result {
+    background: var(--surface2);
+    border-radius: 8px;
+    padding: 12px;
+    margin-top: 8px;
+    font-size: 13px;
+    display: none;
+  }
+  .upload-result.show { display: block; }
+  .upload-result .death-yes { color: var(--red); font-weight: 700; font-size: 16px; }
+  .upload-result .death-no { color: var(--green); font-weight: 700; font-size: 16px; }
+
+  /* Tabs */
+  .tabs {
+    display: flex;
+    border-bottom: 1px solid var(--border);
+  }
+  .tab {
+    flex: 1;
+    padding: 10px;
+    text-align: center;
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+    border-bottom: 2px solid transparent;
+    color: var(--text-dim);
+    transition: all 0.15s;
+    background: none;
+    border-top: none;
+    border-left: none;
+    border-right: none;
+  }
+  .tab:hover { color: var(--text); }
+  .tab.active { color: var(--accent); border-bottom-color: var(--accent); }
+  .tab-content { display: none; }
+  .tab-content.active { display: block; }
+
+  /* Frame count */
+  .frame-counter {
+    font-size: 11px;
+    color: var(--text-dim);
+    text-align: right;
+    padding: 4px 0;
+  }
+</style>
+</head>
+<body>
+
+<div class="header">
+  <h1>Death Detector</h1>
+  <span class="status-badge offline" id="statusBadge">Offline</span>
+  <div style="flex:1"></div>
+  <span class="frame-counter" id="frameCounter"></span>
+</div>
+
+<div class="main">
+  <!-- Video feed -->
+  <div class="video-area" id="videoArea">
+    <div class="video-placeholder" id="placeholder">
+      <svg width="48" height="48" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path d="M15.75 10.5l4.72-4.72a.75.75 0 011.28.53v11.38a.75.75 0 01-1.28.53l-4.72-4.72M4.5 18.75h9a2.25 2.25 0 002.25-2.25v-9A2.25 2.25 0 0013.5 5.25h-9A2.25 2.25 0 002.25 7.5v9a2.25 2.25 0 002.25 2.25z"/></svg>
+      <span>Connect to a stream or upload an image to begin</span>
+    </div>
+    <img id="videoFeed" src="" style="display:none">
+
+    <div class="death-overlay" id="deathOverlay" style="display:none">
+      <div class="count" id="sessionDeaths">0</div>
+      <div class="label">Deaths this stream</div>
+      <div class="total" id="totalDeaths">0 all-time</div>
+    </div>
+  </div>
+
+  <!-- Sidebar -->
+  <div class="sidebar">
+    <div class="tabs">
+      <button class="tab active" data-tab="connect">Stream</button>
+      <button class="tab" data-tab="upload">Image</button>
+      <button class="tab" data-tab="log">Deaths</button>
+    </div>
+
+    <!-- Tab: Connect to stream -->
+    <div class="tab-content active" id="tab-connect">
+      <div class="panel">
+        <h2>Connect to Stream</h2>
+        <div class="form-row">
+          <label>Twitch Channel</label>
+          <input type="text" id="channelInput" placeholder="e.g. shroud">
+        </div>
+        <div class="form-row">
+          <label>Game Profile</label>
+          <select id="profileSelect">
+            {% for p in profiles %}
+            <option value="{{ p }}" {{ 'selected' if p == 'elden_ring' else '' }}>{{ p }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="form-row">
+          <label>Stream Quality</label>
+          <select id="qualitySelect">
+            <option value="best">best</option>
+            <option value="1080p60">1080p60</option>
+            <option value="1080p">1080p</option>
+            <option value="720p60">720p60</option>
+            <option value="720p" selected>720p</option>
+            <option value="480p">480p</option>
+            <option value="worst">worst</option>
+          </select>
+        </div>
+        <div class="form-row">
+          <label>Capture Interval (seconds)</label>
+          <input type="number" id="intervalInput" value="2" min="0.5" max="10" step="0.5">
+        </div>
+        <div class="form-row">
+          <label>Cooldown (seconds)</label>
+          <input type="number" id="cooldownInput" value="15" min="1" max="120">
+        </div>
+        <div class="btn-row">
+          <button class="btn btn-primary" id="startBtn" onclick="startDetection()">Start</button>
+          <button class="btn btn-danger" id="stopBtn" onclick="stopDetection()" disabled>Stop</button>
+        </div>
+      </div>
+
+      <div class="panel">
+        <h2>Detection Scores</h2>
+        <div id="scoreBars">
+          <div class="score-bar bar-template"><div class="bar-header"><span class="name">Template</span><span class="value" id="s-template">0.00</span></div><div class="bar-track"><div class="bar-fill" id="b-template" style="width:0%"></div></div></div>
+          <div class="score-bar bar-color"><div class="bar-header"><span class="name">Color</span><span class="value" id="s-color">0.00</span></div><div class="bar-track"><div class="bar-fill" id="b-color" style="width:0%"></div></div></div>
+          <div class="score-bar bar-brightness"><div class="bar-header"><span class="name">Brightness</span><span class="value" id="s-brightness">0.00</span></div><div class="bar-track"><div class="bar-fill" id="b-brightness" style="width:0%"></div></div></div>
+          <div class="score-bar bar-fade"><div class="bar-header"><span class="name">Fade</span><span class="value" id="s-fade">0.00</span></div><div class="bar-track"><div class="bar-fill" id="b-fade" style="width:0%"></div></div></div>
+          <div class="score-bar bar-scene_change"><div class="bar-header"><span class="name">Scene Change</span><span class="value" id="s-scene_change">0.00</span></div><div class="bar-track"><div class="bar-fill" id="b-scene_change" style="width:0%"></div></div></div>
+          <div style="margin-top:8px"></div>
+          <div class="score-bar bar-confidence"><div class="bar-header"><span class="name">Confidence</span><span class="value" id="s-confidence">0.000</span></div><div class="bar-track"><div class="threshold-marker" id="thresholdMarker" style="left:80%"></div><div class="bar-fill" id="b-confidence" style="width:0%"></div></div></div>
+        </div>
+        <div class="threshold-control">
+          <label style="font-size:12px;color:var(--text-dim)">Threshold</label>
+          <input type="range" id="thresholdSlider" min="0" max="1" step="0.01" value="0.80" oninput="updateThreshold(this.value)">
+          <span class="val" id="thresholdVal">0.80</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Tab: Upload image -->
+    <div class="tab-content" id="tab-upload">
+      <div class="panel">
+        <h2>Test Single Image</h2>
+        <p style="font-size:13px;color:var(--text-dim);margin-bottom:12px">
+          Upload a screenshot to test detection without connecting to a stream.
+        </p>
+        <div class="form-row">
+          <label>Game Profile</label>
+          <select id="uploadProfileSelect">
+            {% for p in profiles %}
+            <option value="{{ p }}" {{ 'selected' if p == 'elden_ring' else '' }}>{{ p }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="upload-zone" id="uploadZone" onclick="document.getElementById('fileInput').click()">
+          <input type="file" id="fileInput" accept="image/*" onchange="analyzeImage(this)">
+          <p>Click or drag an image here</p>
+        </div>
+        <div class="upload-result" id="uploadResult">
+          <div id="uploadVerdict"></div>
+          <div id="uploadScores" style="margin-top:8px"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Tab: Death log -->
+    <div class="tab-content" id="tab-log">
+      <div class="panel">
+        <h2>Death Log</h2>
+        <div class="death-log" id="deathLog">
+          <div class="death-log-empty">No deaths recorded yet.</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+// Tabs
+document.querySelectorAll('.tab').forEach(tab => {
+  tab.addEventListener('click', () => {
+    document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+    document.querySelectorAll('.tab-content').forEach(t => t.classList.remove('active'));
+    tab.classList.add('active');
+    document.getElementById('tab-' + tab.dataset.tab).classList.add('active');
+  });
+});
+
+let pollInterval = null;
+
+async function startDetection() {
+  const channel = document.getElementById('channelInput').value.trim();
+  if (!channel) { alert('Enter a channel name'); return; }
+
+  document.getElementById('startBtn').disabled = true;
+
+  const res = await fetch('/api/start', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({
+      channel,
+      profile: document.getElementById('profileSelect').value,
+      threshold: parseFloat(document.getElementById('thresholdSlider').value),
+      cooldown: parseInt(document.getElementById('cooldownInput').value),
+      quality: document.getElementById('qualitySelect').value,
+      capture_interval: parseFloat(document.getElementById('intervalInput').value),
+    }),
+  });
+
+  const data = await res.json();
+  if (!res.ok) {
+    alert(data.error || 'Failed to start');
+    document.getElementById('startBtn').disabled = false;
+    return;
+  }
+
+  // Show video feed
+  document.getElementById('placeholder').style.display = 'none';
+  document.getElementById('videoFeed').style.display = 'block';
+  document.getElementById('videoFeed').src = '/video_feed?' + Date.now();
+  document.getElementById('deathOverlay').style.display = 'block';
+  document.getElementById('statusBadge').className = 'status-badge live';
+  document.getElementById('statusBadge').textContent = 'Live';
+  document.getElementById('stopBtn').disabled = false;
+
+  // Start polling status
+  if (pollInterval) clearInterval(pollInterval);
+  pollInterval = setInterval(pollStatus, 500);
+}
+
+async function stopDetection() {
+  await fetch('/api/stop', {method: 'POST'});
+  document.getElementById('videoFeed').style.display = 'none';
+  document.getElementById('videoFeed').src = '';
+  document.getElementById('placeholder').style.display = '';
+  document.getElementById('deathOverlay').style.display = 'none';
+  document.getElementById('statusBadge').className = 'status-badge offline';
+  document.getElementById('statusBadge').textContent = 'Offline';
+  document.getElementById('startBtn').disabled = false;
+  document.getElementById('stopBtn').disabled = true;
+  if (pollInterval) { clearInterval(pollInterval); pollInterval = null; }
+}
+
+async function pollStatus() {
+  try {
+    const res = await fetch('/api/status');
+    const data = await res.json();
+
+    // Update scores
+    const scores = data.scores || {};
+    for (const key of ['template', 'color', 'brightness', 'fade', 'scene_change']) {
+      const val = scores[key] || 0;
+      const el = document.getElementById('s-' + key);
+      const bar = document.getElementById('b-' + key);
+      if (el) el.textContent = val.toFixed(2);
+      if (bar) bar.style.width = (val * 100) + '%';
+    }
+    const conf = scores.confidence || 0;
+    document.getElementById('s-confidence').textContent = conf.toFixed(3);
+    document.getElementById('b-confidence').style.width = (conf * 100) + '%';
+
+    // Update threshold marker
+    const threshold = data.threshold || 0.80;
+    document.getElementById('thresholdMarker').style.left = (threshold * 100) + '%';
+
+    // Death counts
+    document.getElementById('sessionDeaths').textContent = data.session_deaths || 0;
+    document.getElementById('totalDeaths').textContent = (data.total_deaths || 0) + ' all-time';
+
+    // Frame counter
+    document.getElementById('frameCounter').textContent = 'Frames: ' + (data.frame_count || 0);
+
+    // Death log
+    const log = data.death_log || [];
+    const logEl = document.getElementById('deathLog');
+    if (log.length === 0) {
+      logEl.innerHTML = '<div class="death-log-empty">No deaths recorded yet.</div>';
+    } else {
+      logEl.innerHTML = log.slice().reverse().map(d =>
+        `<div class="death-entry">
+          <div class="num">${d.session_count}</div>
+          <div class="info">Death #${d.session_count}
+            <div class="conf">Confidence: ${d.confidence} &middot; Total: ${d.total_count}</div>
+          </div>
+          <div class="timestamp">${d.time}</div>
+        </div>`
+      ).join('');
+    }
+  } catch (e) { /* ignore poll errors */ }
+}
+
+async function updateThreshold(val) {
+  document.getElementById('thresholdVal').textContent = parseFloat(val).toFixed(2);
+  document.getElementById('thresholdMarker').style.left = (val * 100) + '%';
+  await fetch('/api/threshold', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({threshold: parseFloat(val)}),
+  });
+}
+
+async function analyzeImage(input) {
+  const file = input.files[0];
+  if (!file) return;
+
+  const form = new FormData();
+  form.append('image', file);
+  form.append('profile', document.getElementById('uploadProfileSelect').value);
+  form.append('threshold', document.getElementById('thresholdSlider').value);
+
+  const res = await fetch('/api/analyze_image', {method: 'POST', body: form});
+  const data = await res.json();
+
+  const resultEl = document.getElementById('uploadResult');
+  resultEl.classList.add('show');
+
+  const verdictEl = document.getElementById('uploadVerdict');
+  if (data.is_death) {
+    verdictEl.innerHTML = '<span class="death-yes">DEATH DETECTED</span>';
+  } else {
+    verdictEl.innerHTML = '<span class="death-no">No death detected</span>';
+  }
+
+  const scoresEl = document.getElementById('uploadScores');
+  const s = data.scores || {};
+  scoresEl.innerHTML = Object.entries(s).map(([k, v]) =>
+    `<div style="display:flex;justify-content:space-between;font-size:12px;padding:2px 0">
+      <span style="color:var(--text-dim)">${k}</span>
+      <span style="font-weight:600;font-variant-numeric:tabular-nums">${v.toFixed(4)}</span>
+    </div>`
+  ).join('');
+
+  // Reset file input
+  input.value = '';
+}
+
+// Drag and drop
+const uploadZone = document.getElementById('uploadZone');
+uploadZone.addEventListener('dragover', e => { e.preventDefault(); uploadZone.style.borderColor = 'var(--accent)'; });
+uploadZone.addEventListener('dragleave', () => { uploadZone.style.borderColor = ''; });
+uploadZone.addEventListener('drop', e => {
+  e.preventDefault();
+  uploadZone.style.borderColor = '';
+  const fileInput = document.getElementById('fileInput');
+  fileInput.files = e.dataTransfer.files;
+  analyzeImage(fileInput);
+});
+</script>
+
+</body>
+</html>

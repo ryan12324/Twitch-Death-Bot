@@ -1,0 +1,30 @@
+{
+  "$schema": "https://cdn.coollabs.io/coolify/service-templates/schema.json",
+  "documentation": "https://github.com/ryan12324/Twitch-Death-Bot",
+  "services": {
+    "bot": {
+      "image": "bot",
+      "environment": {
+        "MODE": "bot"
+      },
+      "volumes": [
+        "death-data:/app/data",
+        "death-clips:/app/clips"
+      ]
+    },
+    "web": {
+      "image": "web",
+      "environment": {
+        "MODE": "web",
+        "WEB_PORT": "8080"
+      },
+      "ports": {
+        "main": 8080
+      },
+      "volumes": [
+        "death-data:/app/data",
+        "death-clips:/app/clips"
+      ]
+    }
+  }
+}
