@@ -7,7 +7,6 @@ services:
     volumes:
       - death-data:/app/data
       - death-clips:/app/clips
-      - ./game_profiles/templates:/app/game_profiles/templates
     restart: unless-stopped
 
   web:
@@ -21,7 +20,6 @@ services:
     volumes:
       - death-data:/app/data
       - death-clips:/app/clips
-      - ./game_profiles/templates:/app/game_profiles/templates
     restart: unless-stopped
 
 volumes:
