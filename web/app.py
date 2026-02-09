@@ -369,6 +369,7 @@ def api_analyze_image():
         "is_death": is_death,
         "confidence": round(confidence, 4),
         "scores": scores,
+        "templates_loaded": len(detector.templates),
     })
 
 

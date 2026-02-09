@@ -26,8 +26,12 @@ logger = logging.getLogger(__name__)
 TEMPLATES_DIR = Path(__file__).parent.parent / "game_profiles" / "templates"
 
 # Scales to try when searching for a template in the frame.
-# Covers cases where the stream resolution doesn't match the screenshot.
-SEARCH_SCALES = [1.0, 0.75, 0.5, 1.25, 1.5]
+# Wide range covers high-res templates matched against lower-res frames.
+SEARCH_SCALES = [1.0, 0.75, 0.5, 0.35, 0.25, 0.15, 1.25, 1.5]
+
+# All frames are normalized to this resolution before analysis so that
+# detection behaves identically regardless of input size.
+WORKING_W, WORKING_H = 1280, 720
 
 
 class DeathDetector:
@@ -114,12 +118,18 @@ class DeathDetector:
         Slide each template across the frame at multiple scales.
         Returns the best match score (0-1). This is a true sub-image
         search — the template can be found anywhere on screen.
+
+        Uses both pixel-based AND edge-based matching. Edge matching
+        is critical for games like Dark Souls where the death overlay
+        is semi-transparent — the text edges stay the same but the
+        background pixels change depending on where you die.
         """
         if not self.templates:
             return 0.0
 
         frame_gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
         frame_h, frame_w = frame_gray.shape[:2]
+        frame_edges = cv2.Canny(frame_gray, 50, 150)
 
         best_score = 0.0
 
@@ -128,38 +138,47 @@ class DeathDetector:
             scales = self._compute_scales(tmpl_w, tmpl_h, frame_w, frame_h)
 
             for scale in scales:
-                # Resize template to this scale
                 new_w = int(tmpl_w * scale)
                 new_h = int(tmpl_h * scale)
 
-                # Template must be smaller than the frame
                 if new_w >= frame_w or new_h >= frame_h:
                     continue
                 if new_w < 10 or new_h < 10:
                     continue
 
                 scaled = cv2.resize(template, (new_w, new_h))
+                scaled_edges = cv2.Canny(scaled, 50, 150)
 
-                # If we have screen regions, search within each region
-                # Otherwise search the whole frame
-                search_areas = []
+                # Build search areas from screen regions, fall back to full frame
+                search_areas_gray = []
+                search_areas_edge = []
                 if self.profile.screen_regions:
                     for region in self.profile.screen_regions:
-                        area = self._extract_region(frame_gray, region)
-                        if area.shape[0] > new_h and area.shape[1] > new_w:
-                            search_areas.append(area)
+                        area_g = self._extract_region(frame_gray, region)
+                        area_e = self._extract_region(frame_edges, region)
+                        if area_g.shape[0] > new_h and area_g.shape[1] > new_w:
+                            search_areas_gray.append(area_g)
+                            search_areas_edge.append(area_e)
 
-                if not search_areas:
-                    search_areas = [frame_gray]
+                if not search_areas_gray:
+                    search_areas_gray = [frame_gray]
+                    search_areas_edge = [frame_edges]
 
-                for area in search_areas:
+                for area_g, area_e in zip(search_areas_gray, search_areas_edge):
+                    # Pixel-based match
                     result = cv2.matchTemplate(
-                        area, scaled, cv2.TM_CCOEFF_NORMED
+                        area_g, scaled, cv2.TM_CCOEFF_NORMED
                     )
                     _, max_val, _, _ = cv2.minMaxLoc(result)
                     best_score = max(best_score, max_val)
 
-                    # Early exit if we already found a strong match
+                    # Edge-based match — robust to background changes
+                    result_e = cv2.matchTemplate(
+                        area_e, scaled_edges, cv2.TM_CCOEFF_NORMED
+                    )
+                    _, max_val_e, _, _ = cv2.minMaxLoc(result_e)
+                    best_score = max(best_score, max_val_e)
+
                     if best_score > 0.85:
                         return best_score
 
@@ -239,6 +258,14 @@ class DeathDetector:
         score = min(1.0, mean_diff / 80.0)
         return score
 
+    @staticmethod
+    def _normalize_frame(frame: np.ndarray) -> np.ndarray:
+        """Resize frame to a consistent working resolution."""
+        h, w = frame.shape[:2]
+        if w != WORKING_W or h != WORKING_H:
+            return cv2.resize(frame, (WORKING_W, WORKING_H))
+        return frame
+
     def analyze_frame(self, frame: np.ndarray) -> tuple[bool, float]:
         """
         Analyze a frame for death screen indicators.
@@ -246,6 +273,7 @@ class DeathDetector:
         Returns:
             (is_death, confidence) - whether death was detected and confidence 0-1
         """
+        frame = self._normalize_frame(frame)
         now = time.time()
 
         # Check cooldown
