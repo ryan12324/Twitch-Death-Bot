@@ -1,0 +1,301 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Death Detector</title>
+<style>
+  :root {
+    --bg: #0e0e10;
+    --surface: #18181b;
+    --surface2: #1f1f23;
+    --border: #2f2f35;
+    --text: #efeff1;
+    --text-dim: #adadb8;
+    --accent: #9147ff;
+    --accent-hover: #772ce8;
+    --red: #ff4444;
+    --green: #00c853;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    min-height: 100vh;
+  }
+
+  /* Nav */
+  nav {
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+    padding: 14px 32px;
+    display: flex;
+    align-items: center;
+    gap: 24px;
+  }
+  nav .logo {
+    font-size: 20px;
+    font-weight: 700;
+    color: var(--red);
+    text-decoration: none;
+    letter-spacing: -0.5px;
+  }
+  nav .logo span { color: var(--text); }
+  nav a.nav-link {
+    color: var(--text-dim);
+    text-decoration: none;
+    font-size: 14px;
+    font-weight: 500;
+    padding: 6px 12px;
+    border-radius: 6px;
+    transition: all 0.15s;
+  }
+  nav a.nav-link:hover { color: var(--text); background: var(--surface2); }
+  nav a.nav-link.active { color: var(--accent); }
+
+  /* Hero */
+  .hero {
+    text-align: center;
+    padding: 80px 32px 48px;
+  }
+  .hero .skull {
+    font-size: 72px;
+    line-height: 1;
+    margin-bottom: 16px;
+    filter: drop-shadow(0 0 24px rgba(255,68,68,0.4));
+  }
+  .hero h1 {
+    font-size: 42px;
+    font-weight: 800;
+    letter-spacing: -1px;
+    margin-bottom: 12px;
+  }
+  .hero h1 .red { color: var(--red); }
+  .hero p {
+    font-size: 17px;
+    color: var(--text-dim);
+    max-width: 560px;
+    margin: 0 auto 32px;
+    line-height: 1.6;
+  }
+  .hero .cta {
+    display: inline-flex;
+    gap: 12px;
+    flex-wrap: wrap;
+    justify-content: center;
+  }
+  .hero .cta a {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 14px 28px;
+    border-radius: 8px;
+    font-size: 15px;
+    font-weight: 600;
+    text-decoration: none;
+    transition: all 0.15s;
+  }
+  .cta .primary { background: var(--accent); color: white; }
+  .cta .primary:hover { background: var(--accent-hover); transform: translateY(-1px); }
+  .cta .secondary { background: var(--surface2); color: var(--text); border: 1px solid var(--border); }
+  .cta .secondary:hover { border-color: var(--accent); }
+
+  /* Stats strip */
+  .stats-strip {
+    display: flex;
+    justify-content: center;
+    gap: 48px;
+    padding: 40px 32px;
+    border-top: 1px solid var(--border);
+    border-bottom: 1px solid var(--border);
+    background: var(--surface);
+  }
+  .stat { text-align: center; }
+  .stat .num {
+    font-size: 36px;
+    font-weight: 800;
+    color: var(--red);
+    line-height: 1;
+    font-variant-numeric: tabular-nums;
+  }
+  .stat .num.green { color: var(--green); }
+  .stat .num.accent { color: var(--accent); }
+  .stat .lbl {
+    font-size: 12px;
+    color: var(--text-dim);
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    margin-top: 6px;
+  }
+
+  /* Cards grid */
+  .cards {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+    gap: 20px;
+    padding: 48px 32px;
+    max-width: 1100px;
+    margin: 0 auto;
+  }
+  .card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 28px;
+    transition: border-color 0.2s;
+  }
+  .card:hover { border-color: var(--accent); }
+  .card .icon {
+    width: 44px;
+    height: 44px;
+    border-radius: 10px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 22px;
+    margin-bottom: 16px;
+  }
+  .card .icon.red { background: rgba(255,68,68,0.15); }
+  .card .icon.blue { background: rgba(33,150,243,0.15); }
+  .card .icon.purple { background: rgba(145,71,255,0.15); }
+  .card h3 {
+    font-size: 16px;
+    font-weight: 600;
+    margin-bottom: 8px;
+  }
+  .card p {
+    font-size: 13px;
+    color: var(--text-dim);
+    line-height: 1.6;
+  }
+
+  /* Games section */
+  .section-title {
+    text-align: center;
+    font-size: 24px;
+    font-weight: 700;
+    padding-top: 48px;
+  }
+  .section-sub {
+    text-align: center;
+    font-size: 14px;
+    color: var(--text-dim);
+    margin-top: 8px;
+    margin-bottom: 32px;
+  }
+  .games-grid {
+    display: flex;
+    justify-content: center;
+    flex-wrap: wrap;
+    gap: 12px;
+    padding: 0 32px 64px;
+  }
+  .game-chip {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 20px;
+    padding: 8px 18px;
+    font-size: 13px;
+    font-weight: 500;
+    color: var(--text-dim);
+  }
+
+  /* Footer */
+  footer {
+    text-align: center;
+    padding: 32px;
+    border-top: 1px solid var(--border);
+    color: var(--text-dim);
+    font-size: 13px;
+  }
+  footer a { color: var(--accent); text-decoration: none; }
+</style>
+</head>
+<body>
+
+<nav>
+  <a href="/" class="logo"><span>Death</span>Detector</a>
+  <div style="flex:1"></div>
+  <a href="/" class="nav-link active">Home</a>
+  <a href="/test" class="nav-link">Test</a>
+</nav>
+
+<div class="hero">
+  <div class="skull">&#x1F480;</div>
+  <h1>Twitch <span class="red">Death</span> Counter</h1>
+  <p>
+    Image detection bot that watches your Twitch stream for death screens,
+    counts every death, and announces them in chat. Works with Souls games,
+    Sekiro, Hollow Knight, Celeste, and more.
+  </p>
+  <div class="cta">
+    <a href="/test" class="primary">
+      <svg width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z"/><path d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+      Test Against Stream
+    </a>
+    <a href="https://github.com/ryan12324/Twitch-Death-Bot" class="secondary" target="_blank">
+      <svg width="18" height="18" fill="currentColor" viewBox="0 0 24 24"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z"/></svg>
+      GitHub
+    </a>
+  </div>
+</div>
+
+<div class="stats-strip" id="statsStrip">
+  <div class="stat">
+    <div class="num" id="statTotal">{{ total_deaths }}</div>
+    <div class="lbl">Total Deaths</div>
+  </div>
+  <div class="stat">
+    <div class="num green" id="statSessions">{{ sessions }}</div>
+    <div class="lbl">Sessions Tracked</div>
+  </div>
+  <div class="stat">
+    <div class="num accent" id="statProfiles">{{ profile_count }}</div>
+    <div class="lbl">Game Profiles</div>
+  </div>
+</div>
+
+<div class="cards">
+  <div class="card">
+    <div class="icon red">&#x1F50D;</div>
+    <h3>Image Detection</h3>
+    <p>
+      5 detection strategies combined: template matching, color analysis,
+      brightness, fade-to-black, and scene change detection. Requires 2
+      consecutive frames to confirm, minimizing false positives.
+    </p>
+  </div>
+  <div class="card">
+    <div class="icon blue">&#x1F4F9;</div>
+    <h3>Death Clips</h3>
+    <p>
+      Automatically saves a short video clip around every death (3s before,
+      2s after). Build death compilation videos with a single ffmpeg command.
+    </p>
+  </div>
+  <div class="card">
+    <div class="icon purple">&#x1F9EA;</div>
+    <h3>Testing GUI</h3>
+    <p>
+      Connect to any live stream from the browser, watch detection scores
+      in real time, tune the threshold with a slider, or test against
+      uploaded screenshots.
+    </p>
+  </div>
+</div>
+
+<h2 class="section-title">Supported Games</h2>
+<p class="section-sub">Pre-configured profiles with game-specific detection tuning</p>
+<div class="games-grid">
+  {% for name, profile in profiles.items() %}
+  <div class="game-chip">{{ profile.display_name }}</div>
+  {% endfor %}
+</div>
+
+<footer>
+  Death Detector &mdash; Port 4444 because &#x56DB; means death
+</footer>
+
+</body>
+</html>

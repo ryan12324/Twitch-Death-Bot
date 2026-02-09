@@ -251,8 +251,20 @@ def _detection_thread():
 
 
 @app.route("/")
-def index():
-    return render_template("index.html", profiles=list_profiles())
+def home():
+    counter = DeathCounter()
+    return render_template(
+        "home.html",
+        profiles=PROFILES,
+        profile_count=len(PROFILES),
+        total_deaths=counter.total_deaths,
+        sessions=len(counter.data.get("sessions", [])),
+    )
+
+
+@app.route("/test")
+def test_page():
+    return render_template("test.html", profiles=list_profiles())
 
 
 @app.route("/api/start", methods=["POST"])

@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Death Detector - Testing GUI</title>
+<title>Death Detector - Test</title>
 <style>
   :root {
     --bg: #0e0e10;
@@ -26,7 +26,7 @@
     min-height: 100vh;
   }
 
-  /* Header */
+  /* Nav */
   .header {
     background: var(--surface);
     border-bottom: 1px solid var(--border);
@@ -35,7 +35,24 @@
     align-items: center;
     gap: 16px;
   }
-  .header h1 { font-size: 18px; font-weight: 600; }
+  .header .logo {
+    font-size: 18px;
+    font-weight: 700;
+    color: var(--red);
+    text-decoration: none;
+    letter-spacing: -0.3px;
+  }
+  .header .logo span { color: var(--text); }
+  .header .nav-link {
+    color: var(--text-dim);
+    text-decoration: none;
+    font-size: 14px;
+    font-weight: 500;
+    padding: 4px 10px;
+    border-radius: 6px;
+  }
+  .header .nav-link:hover { color: var(--text); background: var(--surface2); }
+  .header .nav-link.active { color: var(--accent); }
   .header .status-badge {
     padding: 4px 12px;
     border-radius: 12px;
@@ -344,7 +361,9 @@
 <body>
 
 <div class="header">
-  <h1>Death Detector</h1>
+  <a href="/" class="logo"><span>Death</span>Detector</a>
+  <a href="/" class="nav-link">Home</a>
+  <a href="/test" class="nav-link active">Test</a>
   <span class="status-badge offline" id="statusBadge">Offline</span>
   <div style="flex:1"></div>
   <span class="frame-counter" id="frameCounter"></span>
