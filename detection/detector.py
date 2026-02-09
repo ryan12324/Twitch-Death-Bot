@@ -124,17 +124,21 @@ class DeathDetector:
         """Build the list of scales to try, including auto-fit for oversized templates."""
         scales = list(SEARCH_SCALES)
 
-        # If the template is close to or larger than the frame, add fit scales
-        if tmpl_w > frame_w * 0.7 or tmpl_h > frame_h * 0.7:
-            fit_w = (frame_w * 0.8) / tmpl_w
-            fit_h = (frame_h * 0.8) / tmpl_h
-            fit = min(fit_w, fit_h)
+        if tmpl_w > frame_w * 0.5 or tmpl_h > frame_h * 0.5:
+            # Tight fit: template nearly fills the frame — best match when
+            # the uploaded image IS (or is very close to) the template itself
+            tight = min((frame_w - 2) / tmpl_w, (frame_h - 2) / tmpl_h)
+            if 0.05 < tight < 3.0:
+                scales.append(round(tight, 4))
+
+            # 80% / 60% / 40% fits for more breathing room
+            fit = min((frame_w * 0.8) / tmpl_w, (frame_h * 0.8) / tmpl_h)
             for s in [fit, fit * 0.75, fit * 0.5]:
-                if 0.05 < s < 3.0 and s not in scales:
+                if 0.05 < s < 3.0 and round(s, 4) not in scales:
                     scales.append(round(s, 4))
 
-        logger.debug(
-            "Scales for template %dx%d in frame %dx%d: %s",
+        logger.info(
+            "scales: template %dx%d in frame %dx%d -> %s",
             tmpl_w, tmpl_h, frame_w, frame_h, scales,
         )
         return scales
@@ -358,16 +362,25 @@ class DeathDetector:
 
     @staticmethod
     def _normalize_frame(frame: np.ndarray) -> np.ndarray:
-        """Resize frame to a consistent working resolution."""
+        """Scale frame to fit within working resolution, preserving aspect ratio.
+
+        Never stretches — only scales down proportionally if the frame is
+        larger than WORKING_W x WORKING_H. This keeps template matching
+        accurate because the pixel proportions stay intact.
+        """
         h, w = frame.shape[:2]
-        if w != WORKING_W or h != WORKING_H:
-            logger.info(
-                "normalize: %dx%d -> %dx%d",
-                w, h, WORKING_W, WORKING_H,
-            )
-            return cv2.resize(frame, (WORKING_W, WORKING_H))
-        logger.debug("normalize: already %dx%d, no resize", w, h)
-        return frame
+        if w <= WORKING_W and h <= WORKING_H:
+            logger.debug("normalize: %dx%d fits, no resize needed", w, h)
+            return frame
+
+        scale = min(WORKING_W / w, WORKING_H / h)
+        new_w = int(w * scale)
+        new_h = int(h * scale)
+        logger.info(
+            "normalize: %dx%d -> %dx%d (scale=%.4f, aspect preserved)",
+            w, h, new_w, new_h, scale,
+        )
+        return cv2.resize(frame, (new_w, new_h))
 
     def analyze_frame(self, frame: np.ndarray) -> tuple[bool, float]:
         """
