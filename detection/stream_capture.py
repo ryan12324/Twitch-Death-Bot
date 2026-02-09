@@ -1,8 +1,11 @@
 """
-Twitch stream frame capture using streamlink + OpenCV.
+Twitch stream frame capture using streamlink + ffmpeg.
 
 Captures frames from a live Twitch stream at a configurable interval
 and feeds them to the death detector.
+
+Uses streamlink to pipe the stream directly into ffmpeg, avoiding
+the two-step URL resolution that can fail with certain Twitch configs.
 """
 
 import logging
@@ -15,9 +18,21 @@ import numpy as np
 
 logger = logging.getLogger(__name__)
 
+# Quality fallback order — try requested quality first, then fall through
+QUALITY_FALLBACK = [
+    "best",
+    "1080p60",
+    "1080p",
+    "720p60",
+    "720p",
+    "480p",
+    "360p",
+    "worst",
+]
+
 
 class StreamCapture:
-    """Captures frames from a Twitch stream using streamlink."""
+    """Captures frames from a Twitch stream using streamlink piped to ffmpeg."""
 
     def __init__(
         self,
@@ -28,91 +43,148 @@ class StreamCapture:
         self.channel = channel
         self.quality = quality
         self.capture_interval = capture_interval
-        self.stream_url = f"https://twitch.tv/{channel}"
+        # streamlink works with both forms but www. is more reliable
+        self.stream_url = f"https://www.twitch.tv/{channel}"
 
-        self._process: subprocess.Popen | None = None
+        self._streamlink_proc: subprocess.Popen | None = None
+        self._ffmpeg_proc: subprocess.Popen | None = None
         self._running = False
         self._lock = threading.Lock()
         self._latest_frame: np.ndarray | None = None
+        self.last_error: str = ""
 
-    def _get_stream_url(self) -> str | None:
-        """Use streamlink to resolve the actual stream URL."""
+    def _find_quality(self) -> str | None:
+        """Find the best available quality from the stream."""
+        # Build fallback list starting with requested quality
+        candidates = [self.quality]
+        for q in QUALITY_FALLBACK:
+            if q not in candidates:
+                candidates.append(q)
+
+        # Use streamlink to check available streams
         try:
             result = subprocess.run(
-                [
-                    "streamlink",
-                    "--stream-url",
-                    self.stream_url,
-                    self.quality,
-                ],
+                ["streamlink", self.stream_url],
                 capture_output=True,
                 text=True,
-                timeout=15,
+                timeout=20,
             )
-            if result.returncode == 0:
-                url = result.stdout.strip()
-                logger.info("Resolved stream URL for %s", self.channel)
-                return url
-            else:
-                logger.error(
-                    "streamlink failed: %s", result.stderr.strip()
-                )
-                return None
+            output = result.stdout + result.stderr
+            logger.info("streamlink available streams output:\n%s", output.strip())
+
+            # Pick the first candidate that appears in the output
+            for quality in candidates:
+                if quality in output:
+                    if quality != self.quality:
+                        logger.info(
+                            "Requested %s not available, using %s",
+                            self.quality,
+                            quality,
+                        )
+                    return quality
+
+            # If none matched explicitly, just try "best"
+            return "best"
+
         except FileNotFoundError:
-            logger.error(
-                "streamlink not found. Install it: pip install streamlink"
-            )
+            self.last_error = "streamlink not found — install it with: pip install streamlink"
+            logger.error(self.last_error)
             return None
         except subprocess.TimeoutExpired:
-            logger.error("Timed out resolving stream URL")
+            self.last_error = "Timed out checking stream availability"
+            logger.error(self.last_error)
             return None
 
     def start(self) -> bool:
-        """Start capturing frames from the stream. Returns True if started."""
-        resolved_url = self._get_stream_url()
-        if not resolved_url:
-            logger.error(
-                "Could not resolve stream for %s. Is the channel live?",
-                self.channel,
-            )
+        """
+        Start capturing frames from the stream.
+
+        Uses streamlink in pipe/stdout mode to feed raw video into ffmpeg,
+        which is more reliable than resolving a URL first.
+        """
+        quality = self._find_quality()
+        if not quality:
             return False
 
-        self._process = subprocess.Popen(
+        # streamlink pipes the stream to stdout
+        try:
+            self._streamlink_proc = subprocess.Popen(
+                [
+                    "streamlink",
+                    "--stdout",
+                    "--loglevel", "warning",
+                    self.stream_url,
+                    quality,
+                ],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+        except FileNotFoundError:
+            self.last_error = "streamlink not found — install it with: pip install streamlink"
+            logger.error(self.last_error)
+            return False
+
+        # Give streamlink a moment to connect or fail
+        time.sleep(3)
+        if self._streamlink_proc.poll() is not None:
+            stderr = ""
+            if self._streamlink_proc.stderr:
+                stderr = self._streamlink_proc.stderr.read().decode(errors="replace").strip()
+            self.last_error = f"streamlink failed to connect: {stderr or 'channel may be offline'}"
+            logger.error(self.last_error)
+            self._streamlink_proc = None
+            return False
+
+        # ffmpeg reads from streamlink's stdout pipe
+        self._ffmpeg_proc = subprocess.Popen(
             [
                 "ffmpeg",
-                "-i", resolved_url,
+                "-i", "pipe:0",
                 "-f", "rawvideo",
                 "-pix_fmt", "bgr24",
                 "-vf", "fps=1/{},scale=1280:720".format(
                     max(1, int(self.capture_interval))
                 ),
-                "-an",        # no audio
-                "-sn",        # no subtitles
+                "-an",
+                "-sn",
                 "-loglevel", "error",
                 "pipe:1",
             ],
+            stdin=self._streamlink_proc.stdout,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
         )
 
+        # Give ffmpeg a moment to start decoding
+        time.sleep(2)
+        if self._ffmpeg_proc.poll() is not None:
+            stderr = ""
+            if self._ffmpeg_proc.stderr:
+                stderr = self._ffmpeg_proc.stderr.read().decode(errors="replace").strip()
+            self.last_error = f"ffmpeg failed to decode stream: {stderr}"
+            logger.error(self.last_error)
+            self._cleanup()
+            return False
+
         self._running = True
+        self.last_error = ""
         logger.info(
-            "Stream capture started for %s at %s quality",
+            "Stream capture started for %s (%s quality)",
             self.channel,
-            self.quality,
+            quality,
         )
         return True
 
     def read_frame(self) -> np.ndarray | None:
         """Read a single frame from the stream. Returns None if unavailable."""
-        if self._process is None or self._process.stdout is None:
+        if self._ffmpeg_proc is None or self._ffmpeg_proc.stdout is None:
             return None
 
         width, height = 1280, 720
         frame_size = width * height * 3  # BGR24
 
         try:
-            raw = self._process.stdout.read(frame_size)
+            raw = self._ffmpeg_proc.stdout.read(frame_size)
             if len(raw) != frame_size:
                 return None
 
@@ -133,19 +205,25 @@ class StreamCapture:
             return self._latest_frame.copy() if self._latest_frame is not None else None
 
     def is_running(self) -> bool:
-        """Check if the capture process is still alive."""
-        if self._process is None:
+        """Check if the capture pipeline is still alive."""
+        if self._ffmpeg_proc is None:
             return False
-        return self._process.poll() is None
+        return self._ffmpeg_proc.poll() is None
+
+    def _cleanup(self) -> None:
+        """Terminate both processes."""
+        for proc in (self._ffmpeg_proc, self._streamlink_proc):
+            if proc:
+                proc.terminate()
+                try:
+                    proc.wait(timeout=5)
+                except subprocess.TimeoutExpired:
+                    proc.kill()
+        self._ffmpeg_proc = None
+        self._streamlink_proc = None
 
     def stop(self) -> None:
         """Stop the stream capture."""
         self._running = False
-        if self._process:
-            self._process.terminate()
-            try:
-                self._process.wait(timeout=5)
-            except subprocess.TimeoutExpired:
-                self._process.kill()
-            self._process = None
-            logger.info("Stream capture stopped for %s", self.channel)
+        self._cleanup()
+        logger.info("Stream capture stopped for %s", self.channel)

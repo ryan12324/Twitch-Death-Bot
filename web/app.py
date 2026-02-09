@@ -294,7 +294,8 @@ def api_start():
     )
 
     if not capture.start():
-        return jsonify({"error": f"Could not connect to {channel}. Is the stream live?"}), 502
+        error = capture.last_error or f"Could not connect to {channel}. Is the stream live?"
+        return jsonify({"error": error}), 502
 
     counter = DeathCounter()
     counter.start_session(profile_name)
