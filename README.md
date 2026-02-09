@@ -123,7 +123,7 @@ A death is only confirmed after **2 consecutive frames** exceed the confidence t
 | `CLIP_POST_DEATH_SECONDS` | `2.0` | Seconds of footage after the death |
 | `CLIP_OUTPUT_FPS` | `10.0` | Playback FPS for saved clips |
 | `CLIP_OUTPUT_DIR` | `clips/` | Directory for saved death clips |
-| `WEB_PORT` | `8080` | Port for the web testing GUI |
+| `WEB_PORT` | `4444` | Port for the web testing GUI |
 | `WEB_DEBUG` | `false` | Flask debug mode (auto-reload) |
 
 ## Adding a New Game
@@ -201,7 +201,7 @@ A browser-based dashboard for testing detection against any live stream. Lets yo
 python web/app.py
 ```
 
-Open `http://localhost:8080`. From the dashboard you can:
+Open `http://localhost:4444`. From the dashboard you can:
 
 - **Connect to any Twitch stream** by channel name
 - **Watch live detection** with per-strategy score bars overlaid on the video
@@ -215,7 +215,7 @@ Open `http://localhost:8080`. From the dashboard you can:
 docker compose up web
 ```
 
-The GUI is available at `http://localhost:8080`.
+The GUI is available at `http://localhost:4444`.
 
 ## Deploying to Coolify
 
@@ -231,7 +231,7 @@ This project is ready for [Coolify](https://coolify.io/) self-hosted deployment.
    - `GAME_PROFILE`
    - Any other overrides from the config reference
 4. Deploy — Coolify will build and start both the `bot` and `web` services
-5. Map a domain to the `web` service (port 8080) for the testing GUI
+5. Map a domain to the `web` service (port 4444) for the testing GUI
 
 ### Option 2: Single service (bot only or web only)
 
@@ -240,7 +240,7 @@ This project is ready for [Coolify](https://coolify.io/) self-hosted deployment.
 3. Set the `MODE` environment variable:
    - `MODE=bot` — runs the Twitch chat bot with detection (default)
    - `MODE=web` — runs only the web testing GUI
-4. For the web GUI, expose port `8080`
+4. For the web GUI, expose port `4444`
 5. Add the rest of your `.env` variables
 
 ### Persistent storage

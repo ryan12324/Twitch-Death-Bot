@@ -22,6 +22,6 @@ VOLUME ["/app/data", "/app/clips"]
 
 # Default: run the bot. Override with "web" to run the testing GUI.
 ENV MODE=bot
-EXPOSE 8080
+EXPOSE 4444
 
 CMD ["sh", "-c", "if [ \"$MODE\" = 'web' ]; then python web/app.py; else python main.py; fi"]

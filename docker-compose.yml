@@ -15,9 +15,9 @@ services:
     env_file: .env
     environment:
       MODE: web
-      WEB_PORT: "8080"
+      WEB_PORT: "4444"
     ports:
-      - "8080:8080"
+      - "4444:4444"
     volumes:
       - death-data:/app/data
       - death-clips:/app/clips

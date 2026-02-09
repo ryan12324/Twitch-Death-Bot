@@ -16,10 +16,10 @@
       "image": "web",
       "environment": {
         "MODE": "web",
-        "WEB_PORT": "8080"
+        "WEB_PORT": "4444"
       },
       "ports": {
-        "main": 8080
+        "main": 4444
       },
       "volumes": [
         "death-data:/app/data",

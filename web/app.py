@@ -422,7 +422,7 @@ def _stop_capture() -> dict:
 
 
 def main():
-    port = int(os.getenv("WEB_PORT", "8080"))
+    port = int(os.getenv("WEB_PORT", "4444"))
     debug = os.getenv("WEB_DEBUG", "false").lower() in ("true", "1")
     logger.info("Starting testing GUI on port %d", port)
     app.run(host="0.0.0.0", port=port, debug=debug, threaded=True)
