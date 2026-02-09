@@ -17,6 +17,7 @@ from pathlib import Path
 from dotenv import load_dotenv
 
 from bot.twitch_bot import DeathBot
+from detection.clip_recorder import ClipRecorder
 from detection.counter import DeathCounter
 from detection.detector import DeathDetector
 from detection.stream_capture import StreamCapture
@@ -62,6 +63,11 @@ def get_config() -> dict:
         "threshold": float(os.getenv("DETECTION_THRESHOLD", "0.80")),
         "cooldown": int(os.getenv("DEATH_COOLDOWN", "15")),
         "quality": os.getenv("STREAM_QUALITY", "720p"),
+        "clip_enabled": os.getenv("CLIP_ENABLED", "true").lower() in ("true", "1", "yes"),
+        "clip_pre_seconds": float(os.getenv("CLIP_PRE_DEATH_SECONDS", "3.0")),
+        "clip_post_seconds": float(os.getenv("CLIP_POST_DEATH_SECONDS", "2.0")),
+        "clip_output_fps": float(os.getenv("CLIP_OUTPUT_FPS", "10.0")),
+        "clip_output_dir": os.getenv("CLIP_OUTPUT_DIR", ""),
     }
 
 
@@ -74,6 +80,7 @@ def detection_loop(
     capture: StreamCapture,
     detector: DeathDetector,
     counter: DeathCounter,
+    clip_recorder: ClipRecorder,
     game: str,
     bot: DeathBot,
     loop: asyncio.AbstractEventLoop,
@@ -95,11 +102,17 @@ def detection_loop(
             stop_event.wait(0.5)
             continue
 
+        # Feed every frame to the clip recorder's rolling buffer
+        clip_recorder.feed_frame(frame)
+
         is_death, confidence = detector.analyze_frame(frame)
 
         if is_death:
             session_count = counter.record_death(game, confidence)
             total_count = counter.total_deaths
+
+            # Trigger clip save (captures post-death frames automatically)
+            clip_recorder.on_death(session_count)
 
             # Schedule chat announcement on the bot's event loop
             asyncio.run_coroutine_threadsafe(
@@ -107,6 +120,8 @@ def detection_loop(
                 loop,
             )
 
+    # Flush any in-progress clip on shutdown
+    clip_recorder.flush()
     logger.info("Detection loop stopped")
 
 
@@ -137,12 +152,23 @@ def main() -> None:
         capture_interval=config["capture_interval"],
     )
 
+    clip_output_dir = Path(config["clip_output_dir"]) if config["clip_output_dir"] else None
+    clip_recorder = ClipRecorder(
+        enabled=config["clip_enabled"],
+        pre_death_seconds=config["clip_pre_seconds"],
+        post_death_seconds=config["clip_post_seconds"],
+        capture_fps=1.0 / config["capture_interval"],
+        output_dir=clip_output_dir,
+        output_fps=config["clip_output_fps"],
+    )
+
     bot = DeathBot(
         token=config["token"],
         prefix="!",
         channel=config["channel"],
         counter=counter,
         game=profile.display_name,
+        clip_recorder=clip_recorder,
     )
 
     # Graceful shutdown
@@ -175,7 +201,7 @@ def main() -> None:
 
     detection_thread = threading.Thread(
         target=detection_loop,
-        args=(capture, detector, counter, config["game"], bot, loop, stop_event),
+        args=(capture, detector, counter, clip_recorder, config["game"], bot, loop, stop_event),
         daemon=True,
     )
     detection_thread.start()

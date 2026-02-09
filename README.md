@@ -9,6 +9,7 @@ A Python bot that watches a Twitch stream, detects death screens from popular ga
 - **Twitch chat integration** with commands for viewers to check death counts
 - **Pre-built game profiles** for Elden Ring, Dark Souls II, Dark Souls III, Sekiro, Hollow Knight, and Celeste
 - **Generic profile** for any game with dark/fade-to-black death screens
+- **Death clip recording** saves a short video clip around every death for easy compilation
 - **Template creator tool** to build reference images from VODs or local video
 
 ## Requirements
@@ -74,6 +75,7 @@ python main.py
 | `!totaldeaths` | All-time death count |
 | `!deathstats` | Full statistics breakdown |
 | `!game` | Show which game is being tracked |
+| `!clips` | Show how many death clips have been saved |
 
 ## Supported Games
 
@@ -114,6 +116,11 @@ A death is only confirmed after **2 consecutive frames** exceed the confidence t
 | `DETECTION_THRESHOLD` | `0.80` | Confidence threshold (0.0 - 1.0) |
 | `DEATH_COOLDOWN` | `15` | Seconds between death detections |
 | `STREAM_QUALITY` | `720p` | Stream quality for capture |
+| `CLIP_ENABLED` | `true` | Save a video clip around each death |
+| `CLIP_PRE_DEATH_SECONDS` | `3.0` | Seconds of footage before the death |
+| `CLIP_POST_DEATH_SECONDS` | `2.0` | Seconds of footage after the death |
+| `CLIP_OUTPUT_FPS` | `10.0` | Playback FPS for saved clips |
+| `CLIP_OUTPUT_DIR` | `clips/` | Directory for saved death clips |
 
 ## Adding a New Game
 
@@ -135,6 +142,7 @@ Twitch-Death-Bot/
 ├── detection/
 │   ├── detector.py                  # Death screen detection engine
 │   ├── stream_capture.py            # Twitch stream frame capture
+│   ├── clip_recorder.py             # Death clip recorder for compilations
 │   └── counter.py                   # Death counter with persistence
 ├── game_profiles/
 │   ├── profiles.py                  # Game-specific detection profiles
@@ -147,6 +155,28 @@ Twitch-Death-Bot/
 │       └── celeste/
 ├── tools/
 │   └── create_templates.py          # Template image creator utility
+├── clips/                           # Saved death clips (gitignored)
 └── data/
     └── deaths.json                  # Persistent death count storage
 ```
+
+## Death Compilation
+
+When `CLIP_ENABLED=true` (the default), the bot keeps a rolling buffer of recent frames. On every death, it saves a short `.mp4` clip to the `clips/` directory containing:
+
+- **3 seconds before** the death (configurable via `CLIP_PRE_DEATH_SECONDS`)
+- **2 seconds after** the death (configurable via `CLIP_POST_DEATH_SECONDS`)
+
+Each clip has a timestamp overlay showing time relative to the death (`-2.0s`, `-1.0s`, `+0.0s`, `+1.0s`, etc.).
+
+To combine all clips into a single compilation video using ffmpeg:
+
+```bash
+# Create a file list
+ls clips/death_*.mp4 | sort | sed 's/^/file /' > clips/list.txt
+
+# Concatenate into one video
+ffmpeg -f concat -safe 0 -i clips/list.txt -c copy death_compilation.mp4
+```
+
+Set `CLIP_ENABLED=false` in `.env` to disable clip recording and save disk space.

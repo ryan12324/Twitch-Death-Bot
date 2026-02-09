@@ -6,12 +6,14 @@ Provides chat commands:
   !totaldeaths - Show all-time death count
   !deathstats  - Full stats breakdown
   !game        - Show current game being tracked
+  !clips       - Show how many death clips have been saved
 """
 
 import logging
 
 from twitchio.ext import commands
 
+from detection.clip_recorder import ClipRecorder
 from detection.counter import DeathCounter
 
 logger = logging.getLogger(__name__)
@@ -25,6 +27,7 @@ class DeathBot(commands.Bot):
         channel: str,
         counter: DeathCounter,
         game: str,
+        clip_recorder: ClipRecorder | None = None,
     ):
         super().__init__(
             token=token,
@@ -34,6 +37,7 @@ class DeathBot(commands.Bot):
         self.counter = counter
         self.game = game
         self.channel_name = channel
+        self.clip_recorder = clip_recorder
 
     async def event_ready(self) -> None:
         logger.info("Bot connected as %s", self.nick)
@@ -77,6 +81,17 @@ class DeathBot(commands.Bot):
     async def cmd_game(self, ctx: commands.Context) -> None:
         """Show the current game being tracked."""
         await ctx.send(f"Currently tracking deaths for: {self.game}")
+
+    @commands.command(name="clips")
+    async def cmd_clips(self, ctx: commands.Context) -> None:
+        """Show how many death clips have been recorded."""
+        if self.clip_recorder and self.clip_recorder.enabled:
+            count = self.clip_recorder.get_clip_count()
+            await ctx.send(
+                f"{count} death clip(s) saved this session for the compilation!"
+            )
+        else:
+            await ctx.send("Clip recording is not enabled.")
 
     async def announce_death(self, session_count: int, total_count: int) -> None:
         """Send a death announcement to chat."""
