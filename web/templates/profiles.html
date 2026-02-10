@@ -662,6 +662,36 @@
     border-radius: 4px;
   }
   .fade-color-display .remove-btn:hover { color: var(--red); background: var(--red-dim); }
+
+  .detected-swatch {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 10px;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    margin: 0 4px 4px 0;
+    cursor: pointer;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    color: var(--text-dim);
+    transition: all 0.12s;
+  }
+  .detected-swatch:hover { border-color: var(--accent); color: var(--text); }
+  .detected-swatch .ds-color {
+    width: 16px;
+    height: 16px;
+    border-radius: 3px;
+    border: 1px solid var(--border);
+    flex-shrink: 0;
+  }
+  .detected-swatch .ds-label {
+    font-size: 10px;
+    color: var(--text-muted);
+    font-weight: 600;
+    text-transform: uppercase;
+  }
 </style>
 </head>
 <body>
@@ -783,12 +813,19 @@
       <!-- Colors -->
       <div class="section">
         <div class="section-head" onclick="toggleSection(this)">
-          <h3>Color Ranges (BGR)</h3>
+          <h3>Dominant Color Ranges (BGR)</h3>
           <span class="chevron">&#9660;</span>
         </div>
         <div class="section-body">
-          <h3 style="font-size:12px;font-weight:600;color:var(--text-dim);margin-bottom:6px;text-transform:uppercase;letter-spacing:0.8px">Dominant Colors</h3>
+          <div style="display:flex;align-items:center;gap:10px;margin-bottom:6px">
+            <h3 style="font-size:12px;font-weight:600;color:var(--text-dim);text-transform:uppercase;letter-spacing:0.8px;margin:0">Dominant Colors</h3>
+            <button class="btn btn-secondary" onclick="autoDetectColors()" style="width:auto;padding:4px 12px;font-size:11px">Detect from Image</button>
+          </div>
           <div id="colorsList"></div>
+          <div id="detectedColors" style="display:none;margin-top:10px">
+            <h3 style="font-size:11px;font-weight:600;color:var(--cyan);text-transform:uppercase;letter-spacing:0.8px;margin-bottom:6px">Detected Colors (click to add)</h3>
+            <div id="detectedColorsList"></div>
+          </div>
 
           <h3 style="font-size:12px;font-weight:600;color:var(--text-dim);margin:16px 0 6px;text-transform:uppercase;letter-spacing:0.8px">Fade-to Color</h3>
           <div id="fadeColorDisplay"></div>
@@ -867,7 +904,7 @@
             <span class="slider-val" id="wTextVal">4</span>
           </div>
           <div class="slider-row">
-            <label style="min-width:90px">Color</label>
+            <label style="min-width:90px">Dom. Color</label>
             <input type="range" id="wColor" min="0" max="10" step="1" value="3" oninput="updateWeightVal('color')">
             <span class="slider-val" id="wColorVal">3</span>
           </div>
@@ -1294,6 +1331,91 @@ function setTool(tool) {
   const btn = document.getElementById('tool' + tool.charAt(0).toUpperCase() + tool.slice(1));
   if (btn) btn.classList.add('active');
   overlay.style.cursor = tool === 'color' ? 'crosshair' : tool === 'region' ? 'crosshair' : 'default';
+}
+
+// ═══════════════════════════════════════════════════════════════
+// AUTO-DETECT COLORS
+// ═══════════════════════════════════════════════════════════════
+
+function autoDetectColors() {
+  if (!canvasImage) { showToast('Upload an image first', 'error'); return; }
+
+  // Downsample for speed
+  const c = document.createElement('canvas');
+  const scale = Math.min(1, 200 / canvasImage.naturalWidth);
+  c.width = Math.round(canvasImage.naturalWidth * scale);
+  c.height = Math.round(canvasImage.naturalHeight * scale);
+  const ctx = c.getContext('2d');
+  ctx.drawImage(canvasImage, 0, 0, c.width, c.height);
+  const data = ctx.getImageData(0, 0, c.width, c.height).data;
+
+  // Bin pixels into 8x8x8 color grid
+  const bins = {};
+  let brightestColor = {r: 0, g: 0, b: 0, brightness: 0};
+  const totalPixels = c.width * c.height;
+
+  for (let i = 0; i < data.length; i += 4) {
+    const r = data[i], g = data[i+1], b = data[i+2];
+    const binR = Math.floor(r / 32) * 32;
+    const binG = Math.floor(g / 32) * 32;
+    const binB = Math.floor(b / 32) * 32;
+    const key = `${binR},${binG},${binB}`;
+    if (!bins[key]) bins[key] = {count: 0, sumR: 0, sumG: 0, sumB: 0};
+    bins[key].count++;
+    bins[key].sumR += r;
+    bins[key].sumG += g;
+    bins[key].sumB += b;
+
+    const brightness = 0.299 * r + 0.587 * g + 0.114 * b;
+    if (brightness > brightestColor.brightness) {
+      brightestColor = {r, g, b, brightness};
+    }
+  }
+
+  // Sort by frequency, get top 3 dominant colors
+  const sorted = Object.entries(bins)
+    .map(([key, v]) => ({
+      r: Math.round(v.sumR / v.count),
+      g: Math.round(v.sumG / v.count),
+      b: Math.round(v.sumB / v.count),
+      pct: (v.count / totalPixels * 100).toFixed(1),
+    }))
+    .sort((a, b) => parseFloat(b.pct) - parseFloat(a.pct));
+
+  const topColors = sorted.slice(0, 3);
+
+  // Render detected colors
+  const container = document.getElementById('detectedColors');
+  const list = document.getElementById('detectedColorsList');
+  container.style.display = 'block';
+
+  let html = '';
+  topColors.forEach((c, i) => {
+    html += `<div class="detected-swatch" onclick="addDetectedColor(${c.r},${c.g},${c.b}, 30)" title="Click to add as dominant color">
+      <div class="ds-color" style="background:rgb(${c.r},${c.g},${c.b})"></div>
+      <span class="ds-label">#${i+1}</span>
+      <span>RGB(${c.r},${c.g},${c.b}) ${c.pct}%</span>
+    </div>`;
+  });
+
+  // Brightest color
+  const bc = brightestColor;
+  html += `<div class="detected-swatch" onclick="addDetectedColor(${bc.r},${bc.g},${bc.b}, 30)" title="Click to add as dominant color" style="border-color:var(--yellow)">
+    <div class="ds-color" style="background:rgb(${bc.r},${bc.g},${bc.b})"></div>
+    <span class="ds-label" style="color:var(--yellow)">Brightest</span>
+    <span>RGB(${bc.r},${bc.g},${bc.b})</span>
+  </div>`;
+
+  list.innerHTML = html;
+}
+
+function addDetectedColor(r, g, b, tolerance) {
+  // BGR for profiles
+  const lower = [Math.max(0, b - tolerance), Math.max(0, g - tolerance), Math.max(0, r - tolerance)];
+  const upper = [Math.min(255, b + tolerance), Math.min(255, g + tolerance), Math.min(255, r + tolerance)];
+  dominantColors.push({lower, upper});
+  renderColors();
+  showToast('Color added', 'success');
 }
 
 // ═══════════════════════════════════════════════════════════════
