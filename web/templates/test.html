@@ -443,6 +443,7 @@
     <div class="tabs">
       <button class="tab active" data-tab="connect">Stream</button>
       <button class="tab" data-tab="upload">Image</button>
+      <button class="tab" data-tab="clip">Clip</button>
       <button class="tab" data-tab="log">Deaths</button>
     </div>
 
@@ -518,6 +519,36 @@
           <div id="uploadVerdict"></div>
           <div id="uploadScores" style="margin-top:8px"></div>
         </div>
+      </div>
+    </div>
+
+    <!-- Tab: Clip -->
+    <div class="tab-content" id="tab-clip">
+      <div class="panel">
+        <h2>Test Twitch Clip</h2>
+        <p style="font-size:13px;color:var(--text-dim);margin-bottom:12px">
+          Paste a Twitch clip URL to test detection across all frames.
+        </p>
+        <div class="form-row">
+          <label>Game Profile</label>
+          <select id="clipProfileSelect">
+            {% for p in profiles %}
+            <option value="{{ p }}" {{ 'selected' if p == 'elden_ring' else '' }}>{{ p }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="form-row">
+          <label>Clip URL</label>
+          <input type="text" id="clipUrlInput" placeholder="e.g. tessdaily/clip/KawaiiRelievedPan...">
+        </div>
+        <button class="btn btn-primary" id="clipAnalyzeBtn" onclick="analyzeClip()">Analyze Clip</button>
+        <div id="clipStatus" style="font-size:13px;color:var(--text-dim);margin-top:8px;display:none"></div>
+        <div class="upload-result" id="clipResult">
+          <div id="clipVerdict"></div>
+          <div id="clipScores" style="margin-top:8px"></div>
+        </div>
+        <!-- Confidence timeline chart -->
+        <canvas id="clipTimeline" width="360" height="100" style="display:none;width:100%;margin-top:12px;border-radius:6px;background:var(--surface2)"></canvas>
       </div>
     </div>
 
@@ -837,6 +868,215 @@ async function analyzeImage(input) {
 
   // Reset file input
   input.value = '';
+}
+
+async function analyzeClip() {
+  const url = document.getElementById('clipUrlInput').value.trim();
+  if (!url) { alert('Enter a clip URL'); return; }
+
+  const btn = document.getElementById('clipAnalyzeBtn');
+  const statusEl = document.getElementById('clipStatus');
+  btn.disabled = true;
+  btn.textContent = 'Downloading & analyzing...';
+  statusEl.style.display = 'block';
+  statusEl.textContent = 'Downloading clip and extracting frames...';
+
+  try {
+    const res = await fetch('/api/analyze_clip', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({
+        url,
+        profile: document.getElementById('clipProfileSelect').value,
+        threshold: parseFloat(document.getElementById('thresholdSlider').value),
+      }),
+    });
+    const data = await res.json();
+
+    if (!res.ok) {
+      alert(data.error || 'Failed to analyze clip');
+      statusEl.textContent = 'Error: ' + (data.error || 'unknown');
+      return;
+    }
+
+    statusEl.style.display = 'none';
+
+    // Show verdict
+    const resultEl = document.getElementById('clipResult');
+    resultEl.classList.add('show');
+    const verdictEl = document.getElementById('clipVerdict');
+    const confVal = (data.scores || {}).confidence || 0;
+    if (data.is_death) {
+      verdictEl.innerHTML = `<span class="death-yes">DEATH DETECTED</span> <span style="font-size:13px;color:var(--text-dim)">confidence: ${confVal.toFixed(4)} &middot; at ${data.best_frame_time}s</span>`;
+    } else {
+      verdictEl.innerHTML = `<span class="death-no">No death detected</span> <span style="font-size:13px;color:var(--text-dim)">confidence: ${confVal.toFixed(4)}</span>`;
+    }
+
+    // Update sidebar score bars
+    const s = data.scores || {};
+    const clipConfigured = s.configured || [];
+    for (const key of ['template', 'text', 'color', 'brightness', 'fade', 'scene_change']) {
+      const val = s[key] || 0;
+      const el = document.getElementById('s-' + key);
+      const bar = document.getElementById('b-' + key);
+      const barParent = bar ? bar.closest('.score-bar') : null;
+      const isConfigured = key === 'scene_change' || clipConfigured.length === 0 || clipConfigured.includes(key);
+      if (barParent) barParent.classList.toggle('unconfigured', !isConfigured);
+      if (el) el.textContent = isConfigured ? val.toFixed(4) : '(not configured)';
+      if (bar) bar.style.width = isConfigured ? (val * 100) + '%' : '0%';
+    }
+    const conf = s.confidence || 0;
+    document.getElementById('s-confidence').textContent = conf.toFixed(4);
+    document.getElementById('b-confidence').style.width = (conf * 100) + '%';
+
+    // Show scores in clip result panel
+    const scoresEl = document.getElementById('clipScores');
+    scoresEl.innerHTML = Object.entries(s)
+      .filter(([k]) => k !== 'configured')
+      .map(([k, v]) => {
+        const isConf = k === 'scene_change' || k === 'confidence' || clipConfigured.length === 0 || clipConfigured.includes(k);
+        const dimStyle = isConf ? 'color:var(--text-dim)' : 'color:#555';
+        const valText = isConf ? v.toFixed(4) : '(not configured)';
+        const valStyle = isConf ? 'font-weight:600;font-variant-numeric:tabular-nums' : 'color:#555;font-size:11px';
+        return `<div style="display:flex;justify-content:space-between;font-size:12px;padding:2px 0">
+          <span style="${dimStyle}">${k}</span>
+          <span style="${valStyle}">${valText}</span>
+        </div>`;
+      }).join('');
+
+    // Populate debug gallery
+    debugImageData = data.debug_images || {};
+    const tabsEl = document.getElementById('debugTabs');
+    tabsEl.innerHTML = '';
+    let firstKey = null;
+    for (const {key, label} of DEBUG_TAB_ORDER) {
+      if (!(key in debugImageData)) continue;
+      if (!firstKey) firstKey = key;
+      const dbtn = document.createElement('button');
+      dbtn.className = 'debug-tab';
+      dbtn.dataset.key = key;
+      dbtn.textContent = label;
+      dbtn.onclick = () => showDebugImage(key);
+      tabsEl.appendChild(dbtn);
+    }
+    if (firstKey) {
+      document.getElementById('placeholder').style.display = 'none';
+      document.getElementById('videoFeed').style.display = 'none';
+      document.getElementById('debugGallery').style.display = 'flex';
+      showDebugImage(firstKey);
+    }
+
+    // Draw timeline chart
+    drawTimeline(data.timeline || [], data.best_frame_time, parseFloat(document.getElementById('thresholdSlider').value));
+
+  } catch (e) {
+    statusEl.textContent = 'Error: ' + e.message;
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Analyze Clip';
+  }
+}
+
+function drawTimeline(timeline, bestTime, threshold) {
+  const canvas = document.getElementById('clipTimeline');
+  if (!timeline.length) { canvas.style.display = 'none'; return; }
+  canvas.style.display = 'block';
+
+  // Use high-DPI rendering
+  const dpr = window.devicePixelRatio || 1;
+  const displayW = canvas.clientWidth || 360;
+  const displayH = 100;
+  canvas.width = displayW * dpr;
+  canvas.height = displayH * dpr;
+  canvas.style.height = displayH + 'px';
+
+  const ctx = canvas.getContext('2d');
+  ctx.scale(dpr, dpr);
+
+  const pad = {top: 14, right: 12, bottom: 22, left: 32};
+  const w = displayW - pad.left - pad.right;
+  const h = displayH - pad.top - pad.bottom;
+
+  const maxTime = timeline[timeline.length - 1].time_sec || 1;
+
+  // Clear
+  ctx.clearRect(0, 0, displayW, displayH);
+
+  // Background
+  ctx.fillStyle = '#1f1f23';
+  ctx.fillRect(0, 0, displayW, displayH);
+
+  // Threshold line
+  const threshY = pad.top + h * (1 - threshold);
+  ctx.strokeStyle = '#ffc107';
+  ctx.lineWidth = 1;
+  ctx.setLineDash([4, 3]);
+  ctx.beginPath();
+  ctx.moveTo(pad.left, threshY);
+  ctx.lineTo(pad.left + w, threshY);
+  ctx.stroke();
+  ctx.setLineDash([]);
+
+  // Threshold label
+  ctx.fillStyle = '#ffc107';
+  ctx.font = '9px sans-serif';
+  ctx.textAlign = 'left';
+  ctx.fillText(threshold.toFixed(2), pad.left + 2, threshY - 3);
+
+  // Draw confidence line
+  ctx.strokeStyle = '#9147ff';
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  let peakX = 0, peakY = 0;
+  for (let i = 0; i < timeline.length; i++) {
+    const x = pad.left + (timeline[i].time_sec / maxTime) * w;
+    const y = pad.top + h * (1 - timeline[i].confidence);
+    if (i === 0) ctx.moveTo(x, y);
+    else ctx.lineTo(x, y);
+    if (timeline[i].time_sec === bestTime || Math.abs(timeline[i].time_sec - bestTime) < 0.01) {
+      peakX = x;
+      peakY = y;
+    }
+  }
+  ctx.stroke();
+
+  // Fill area under the line
+  if (timeline.length > 1) {
+    ctx.lineTo(pad.left + (timeline[timeline.length - 1].time_sec / maxTime) * w, pad.top + h);
+    ctx.lineTo(pad.left + (timeline[0].time_sec / maxTime) * w, pad.top + h);
+    ctx.closePath();
+    ctx.fillStyle = 'rgba(145, 71, 255, 0.15)';
+    ctx.fill();
+  }
+
+  // Peak marker
+  if (peakX > 0) {
+    ctx.fillStyle = '#ff4444';
+    ctx.beginPath();
+    ctx.arc(peakX, peakY, 4, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.fillStyle = '#ff4444';
+    ctx.font = 'bold 9px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText('Death at ' + bestTime.toFixed(1) + 's', peakX, peakY - 8);
+  }
+
+  // X-axis labels
+  ctx.fillStyle = '#adadb8';
+  ctx.font = '9px sans-serif';
+  ctx.textAlign = 'center';
+  const xTicks = 5;
+  for (let i = 0; i <= xTicks; i++) {
+    const t = (maxTime / xTicks) * i;
+    const x = pad.left + (t / maxTime) * w;
+    ctx.fillText(t.toFixed(1) + 's', x, displayH - 4);
+  }
+
+  // Y-axis labels
+  ctx.textAlign = 'right';
+  ctx.fillText('1.0', pad.left - 4, pad.top + 4);
+  ctx.fillText('0.0', pad.left - 4, pad.top + h + 4);
 }
 
 // Drag and drop

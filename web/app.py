@@ -16,7 +16,9 @@ import base64
 import json
 import logging
 import os
+import subprocess
 import sys
+import tempfile
 import threading
 import time
 from pathlib import Path
@@ -573,6 +575,137 @@ def api_analyze_image():
         "templates_loaded": len(detector.templates),
         "debug_images": debug_b64,
     })
+
+
+@app.route("/api/analyze_clip", methods=["POST"])
+def api_analyze_clip():
+    """Analyze a Twitch clip for death detection across all frames."""
+    data = request.get_json()
+    if not data or not data.get("url"):
+        return jsonify({"error": "No clip URL provided"}), 400
+
+    url = data["url"].strip()
+    profile_name = data.get("profile", "generic")
+    threshold = float(data.get("threshold", 0.80))
+
+    # Normalize URL — if it doesn't start with http, prepend https://www.twitch.tv/
+    if not url.startswith("http"):
+        url = "https://www.twitch.tv/" + url
+
+    if profile_name not in PROFILES:
+        return jsonify({"error": f"Unknown profile: {profile_name}"}), 400
+
+    logger.info("analyze_clip: url=%s profile=%s threshold=%.2f", url, profile_name, threshold)
+
+    tmp_path = None
+    try:
+        # Download clip via yt-dlp to a temp file
+        tmp = tempfile.NamedTemporaryFile(suffix=".mp4", delete=False)
+        tmp_path = tmp.name
+        tmp.close()
+
+        try:
+            result = subprocess.run(
+                ["yt-dlp", "--no-playlist", "--format", "best",
+                 "--merge-output-format", "mp4", "-o", tmp_path, url],
+                capture_output=True, text=True, timeout=60,
+            )
+        except FileNotFoundError:
+            return jsonify({"error": "yt-dlp is not installed. Run: pip install yt-dlp"}), 400
+        except subprocess.TimeoutExpired:
+            return jsonify({"error": "Clip download timed out (60s limit)"}), 400
+
+        if result.returncode != 0:
+            logger.error("yt-dlp failed: %s", result.stderr)
+            return jsonify({"error": f"Failed to download clip: {result.stderr.strip()[-200:]}"}), 400
+
+        # Extract frames using cv2.VideoCapture at ~2fps
+        cap = cv2.VideoCapture(tmp_path)
+        if not cap.isOpened():
+            return jsonify({"error": "Could not open downloaded clip"}), 400
+
+        clip_fps = cap.get(cv2.CAP_PROP_FPS) or 30.0
+        total_video_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+        clip_duration = total_video_frames / clip_fps if clip_fps > 0 else 0
+
+        # Sample at ~2fps
+        frame_interval = max(1, int(clip_fps / 2))
+        max_frames = 120
+
+        frames = []
+        frame_times = []
+        frame_idx = 0
+        while True:
+            ret, frame = cap.read()
+            if not ret:
+                break
+            if frame_idx % frame_interval == 0:
+                frames.append(frame)
+                frame_times.append(frame_idx / clip_fps)
+                if len(frames) >= max_frames:
+                    break
+            frame_idx += 1
+        cap.release()
+
+        if not frames:
+            return jsonify({"error": "No frames could be extracted from clip"}), 400
+
+        logger.info(
+            "analyze_clip: extracted %d frames from %d total (%.1fs clip at %.1ffps)",
+            len(frames), total_video_frames, clip_duration, clip_fps,
+        )
+
+        # Create detector and run analyze_frame on all frames to find the best one
+        profile = get_profile(profile_name)
+        detector = DeathDetector(
+            profile=profile, threshold=threshold, cooldown=0, required_consecutive=1,
+        )
+
+        timeline = []
+        best_confidence = -1.0
+        best_frame_idx = 0
+
+        for i, frame in enumerate(frames):
+            is_death, confidence = detector.analyze_frame(frame)
+            timeline.append({
+                "time_sec": round(frame_times[i], 2),
+                "confidence": round(confidence, 4),
+            })
+            # Reset death_frame_count since frames aren't consecutive
+            detector.death_frame_count = 0
+            if confidence > best_confidence:
+                best_confidence = confidence
+                best_frame_idx = i
+
+        # Run analyze_frame_debug on the best-scoring frame only
+        is_death, confidence, debug_images = detector.analyze_frame_debug(frames[best_frame_idx])
+        scores = _get_scores(detector)
+
+        # Encode debug images as base64 JPEGs
+        debug_b64 = {}
+        for name, img in debug_images.items():
+            jpg_bytes = _encode_frame_jpg(img, quality=85)
+            debug_b64[name] = base64.b64encode(jpg_bytes).decode("ascii")
+
+        logger.info(
+            "analyze_clip: RESULT is_death=%s confidence=%.4f best_frame_time=%.2fs",
+            is_death, confidence, frame_times[best_frame_idx],
+        )
+
+        return jsonify({
+            "is_death": is_death,
+            "confidence": round(confidence, 4),
+            "scores": scores,
+            "templates_loaded": len(detector.templates),
+            "debug_images": debug_b64,
+            "timeline": timeline,
+            "clip_duration": round(clip_duration, 2),
+            "best_frame_time": round(frame_times[best_frame_idx], 2),
+        })
+
+    finally:
+        if tmp_path and os.path.exists(tmp_path):
+            os.unlink(tmp_path)
 
 
 @app.route("/video_feed")
