@@ -891,11 +891,21 @@ class DeathDetector:
             return vis
 
         if not hasattr(self, '_ocr_reader') or self._ocr_reader is None:
-            cv2.putText(
-                vis, "OCR reader not initialized", (w // 2 - 160, h // 2),
-                cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 200, 200), 2,
-            )
-            return vis
+            try:
+                from paddleocr import PaddleOCR
+                self._ocr_reader = PaddleOCR(
+                    ocr_version="PP-OCRv4",
+                    lang="en",
+                    use_angle_cls=False,
+                    use_gpu=False,
+                    show_log=False,
+                )
+            except ImportError:
+                cv2.putText(
+                    vis, "paddleocr not installed", (w // 2 - 160, h // 2),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 200, 200), 2,
+                )
+                return vis
 
         indicators_lower = [t.lower() for t in self.profile.text_indicators]
 
