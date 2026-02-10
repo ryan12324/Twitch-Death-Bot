@@ -34,7 +34,7 @@
   "weights": {
     "template": 10,
     "text": 0,
-    "color": 0,
+    "color": 3,
     "brightness": 0,
     "fade": 0,
     "scene_change": 0

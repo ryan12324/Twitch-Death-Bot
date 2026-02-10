@@ -47,6 +47,7 @@ class DeathDetector:
         self.threshold = threshold
         self.cooldown = profile.cooldown_override or cooldown
         self.templates: list[np.ndarray] = []  # grayscale templates
+        self.templates_bgr: list[np.ndarray] = []  # BGR originals (for color masking)
         self.last_detection_time: float = 0.0
         self.previous_frame: np.ndarray | None = None
         self.death_frame_count: int = 0
@@ -87,6 +88,7 @@ class DeathDetector:
             if img_file.suffix.lower() in (".png", ".jpg", ".jpeg", ".bmp"):
                 img = cv2.imread(str(img_file))
                 if img is not None:
+                    self.templates_bgr.append(img)
                     gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
                     self.templates.append(gray)
                     logger.info(
@@ -121,6 +123,22 @@ class DeathDetector:
                 self._scaled_cache[(t_idx, scale)] = (scaled, scaled_edges)
         logger.info("Pre-cached %d scaled template variants", len(self._scaled_cache))
 
+        # Pre-compute color masks for templates (only when profile has dominant_colors)
+        self._color_mask_cache: dict[tuple[int, float], np.ndarray] = {}
+        if self.profile.dominant_colors:
+            for t_idx, tmpl_bgr in enumerate(self.templates_bgr):
+                tmpl_h, tmpl_w = tmpl_bgr.shape[:2]
+                for scale in SEARCH_SCALES:
+                    new_w = int(tmpl_w * scale)
+                    new_h = int(tmpl_h * scale)
+                    if new_w < 10 or new_h < 10:
+                        continue
+                    scaled_bgr = cv2.resize(tmpl_bgr, (new_w, new_h))
+                    mask = self._create_color_mask(scaled_bgr)
+                    if np.count_nonzero(mask) > 0.05 * mask.size:  # >5% pixels match
+                        self._color_mask_cache[(t_idx, scale)] = mask
+            logger.info("Pre-cached %d color mask template variants", len(self._color_mask_cache))
+
     def _extract_region(
         self, frame: np.ndarray, region: ScreenRegion
     ) -> np.ndarray:
@@ -153,6 +171,15 @@ class DeathDetector:
 
         return scales
 
+    def _create_color_mask(self, bgr_image: np.ndarray) -> np.ndarray:
+        """Build a binary mask of pixels matching any of the profile's dominant_colors."""
+        mask = np.zeros(bgr_image.shape[:2], dtype=np.uint8)
+        for cr in self.profile.dominant_colors:
+            lower = np.array(cr.lower, dtype=np.uint8)
+            upper = np.array(cr.upper, dtype=np.uint8)
+            mask |= cv2.inRange(bgr_image, lower, upper)
+        return mask
+
     def _template_match_score(self, frame: np.ndarray, frame_gray: np.ndarray | None) -> float:
         """
         Slide each template across the frame at multiple scales.
@@ -178,7 +205,7 @@ class DeathDetector:
         # Pre-extract search regions once (reused across all scales).
         # Canny is computed per-region crop instead of full-frame — much cheaper
         # when screen_regions are defined (e.g. 200x100 crop vs 1280x720).
-        search_regions: list[tuple[np.ndarray, np.ndarray, int, int]] = []
+        search_regions: list[tuple[np.ndarray, np.ndarray, np.ndarray, int, int]] = []
         full_frame_edges: np.ndarray | None = None  # lazily computed if no regions
         if self.profile.screen_regions:
             for region in self.profile.screen_regions:
@@ -187,7 +214,7 @@ class DeathDetector:
                 roi_e = cv2.Canny(roi_g, 50, 150)
                 ox = int(region.x_min * frame_w)
                 oy = int(region.y_min * frame_h)
-                search_regions.append((roi_g, roi_e, ox, oy))
+                search_regions.append((roi_g, roi_e, roi_bgr, ox, oy))
 
         best_score = 0.0
         best_match_loc = None  # ((x, y), (w, h), score)
@@ -214,11 +241,11 @@ class DeathDetector:
                     continue
 
                 # Build search areas from pre-extracted regions
-                search_areas: list[tuple[np.ndarray, np.ndarray, int, int]] = []
+                search_areas: list[tuple[np.ndarray, np.ndarray, np.ndarray, int, int]] = []
                 if search_regions:
-                    for roi_g, roi_e, ox, oy in search_regions:
+                    for roi_g, roi_e, roi_bgr, ox, oy in search_regions:
                         if roi_g.shape[0] > new_h and roi_g.shape[1] > new_w:
-                            search_areas.append((roi_g, roi_e, ox, oy))
+                            search_areas.append((roi_g, roi_e, roi_bgr, ox, oy))
 
                 if not search_areas:
                     # No regions big enough (or none defined) — fall back to full frame
@@ -226,9 +253,9 @@ class DeathDetector:
                         frame_gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
                     if full_frame_edges is None:
                         full_frame_edges = cv2.Canny(frame_gray, 50, 150)
-                    search_areas = [(frame_gray, full_frame_edges, 0, 0)]
+                    search_areas = [(frame_gray, full_frame_edges, frame, 0, 0)]
 
-                for area_g, area_e, ox, oy in search_areas:
+                for area_g, area_e, area_bgr, ox, oy in search_areas:
                     # Guard: template must fit within search area
                     if area_g.shape[0] < new_h or area_g.shape[1] < new_w:
                         continue
@@ -257,6 +284,25 @@ class DeathDetector:
                             (max_loc_e[0] + ox, max_loc_e[1] + oy),
                             (new_w, new_h), max_val_e,
                         )
+
+                    # Color-filtered match — masks out variable background,
+                    # so only text/overlay pixels contribute to correlation.
+                    color_key = (t_idx, scale)
+                    if color_key in self._color_mask_cache:
+                        tmpl_mask = self._color_mask_cache[color_key]
+                        area_mask = self._create_color_mask(area_bgr)
+                        if (area_mask.shape[0] >= tmpl_mask.shape[0]
+                                and area_mask.shape[1] >= tmpl_mask.shape[1]):
+                            result_c = cv2.matchTemplate(
+                                area_mask, tmpl_mask, cv2.TM_CCOEFF_NORMED
+                            )
+                            _, max_val_c, _, max_loc_c = cv2.minMaxLoc(result_c)
+                            if max_val_c > best_score:
+                                best_score = max_val_c
+                                best_match_loc = (
+                                    (max_loc_c[0] + ox, max_loc_c[1] + oy),
+                                    (new_w, new_h), max_val_c,
+                                )
 
                     if best_score > 0.85:
                         self._last_match_loc = best_match_loc
