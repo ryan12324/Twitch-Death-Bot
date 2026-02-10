@@ -221,12 +221,17 @@ class DeathDetector:
                             search_areas.append((roi_g, roi_e, ox, oy))
 
                 if not search_areas:
-                    # No regions defined — fall back to full-frame Canny (computed once)
+                    # No regions big enough (or none defined) — fall back to full frame
+                    if frame_gray is None:
+                        frame_gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
                     if full_frame_edges is None:
                         full_frame_edges = cv2.Canny(frame_gray, 50, 150)
                     search_areas = [(frame_gray, full_frame_edges, 0, 0)]
 
                 for area_g, area_e, ox, oy in search_areas:
+                    # Guard: template must fit within search area
+                    if area_g.shape[0] < new_h or area_g.shape[1] < new_w:
+                        continue
                     # Pixel-based match
                     result = cv2.matchTemplate(
                         area_g, scaled, cv2.TM_CCOEFF_NORMED
