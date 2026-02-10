@@ -7,10 +7,12 @@ Provides a browser-based dashboard to:
   - See per-strategy score breakdowns (template, color, brightness, fade, scene)
   - Tune threshold / cooldown / game profile on the fly
   - View death log and session stats
+
+Video is streamed as H.264 fMP4 via WebSocket + MSE for smooth 30fps playback,
+while detection runs asynchronously at whatever rate the detector can manage.
 """
 
 import base64
-import io
 import json
 import logging
 import os
@@ -22,6 +24,7 @@ from pathlib import Path
 import cv2
 import numpy as np
 from flask import Flask, Response, jsonify, render_template, request, send_from_directory
+from flask_sock import Sock
 from dotenv import load_dotenv
 
 # Ensure project root is on the path
@@ -34,6 +37,7 @@ from game_profiles.profiles import (
     PROFILES, get_profile, list_profiles,
     profile_to_dict, save_profile, delete_profile, _parse_profile,
 )
+from web.fmp4_encoder import FMP4Encoder
 
 PROJECT_ROOT = Path(__file__).parent.parent
 TEMPLATES_DIR = PROJECT_ROOT / "game_profiles" / "templates"
@@ -45,6 +49,7 @@ logging.basicConfig(level=logging.INFO, format=LOG_FORMAT)
 logger = logging.getLogger("web_gui")
 
 app = Flask(__name__, template_folder="templates", static_folder="static")
+sock = Sock(app)
 
 # ---------------------------------------------------------------------------
 # Global state
@@ -64,6 +69,16 @@ state = {
     "latest_confidence": 0.0,
     "death_log": [],        # [{time, session_count, total_count, confidence}]
     "frame_count": 0,
+    "encoder": None,
+    "overlay_state": {
+        "scores": {},
+        "confidence": 0.0,
+        "is_death": False,
+        "death_flash_until": 0.0,
+        "match_loc": None,
+        "text_boxes": [],
+        "configured": [],
+    },
 }
 state_lock = threading.Lock()
 stop_event = threading.Event()
@@ -88,15 +103,144 @@ def _get_scores(detector: DeathDetector) -> dict:
 
 
 # ---------------------------------------------------------------------------
-# Background detection loop
+# Drawing helpers — used by the video thread to render overlays
+# ---------------------------------------------------------------------------
+
+
+def _draw_overlays(frame: np.ndarray, overlay: dict, detector: DeathDetector) -> np.ndarray:
+    """Draw detection overlays on a frame using cached overlay_state."""
+    display = frame.copy()
+    h, w = display.shape[:2]
+    profile = detector.profile
+    scores = overlay.get("scores", {})
+    configured = overlay.get("configured", [])
+
+    # ── Draw screen regions ──
+    if profile.screen_regions:
+        for region in profile.screen_regions:
+            x1 = int(region.x_min * w)
+            y1 = int(region.y_min * h)
+            x2 = int(region.x_max * w)
+            y2 = int(region.y_max * h)
+            cv2.rectangle(display, (x1, y1), (x2, y2), (187, 102, 255), 2)
+
+    # ── Draw color mask highlights (semi-transparent green) ──
+    if profile.dominant_colors and "color" in configured:
+        combined_mask = np.zeros((h, w), dtype=np.uint8)
+        for cr in profile.dominant_colors:
+            lower = np.array(cr.lower, dtype=np.uint8)
+            upper = np.array(cr.upper, dtype=np.uint8)
+            combined_mask |= cv2.inRange(frame, lower, upper)
+        idx = combined_mask > 0
+        if np.any(idx):
+            pixels = display[idx].astype(np.int16)
+            pixels[:, 1] = np.clip(pixels[:, 1] + 40, 0, 255)
+            display[idx] = pixels.astype(np.uint8)
+
+    # ── Draw template match box ──
+    match_loc = overlay.get("match_loc")
+    if match_loc:
+        loc, size, score_val = match_loc
+        match_color = (0, 255, 0) if score_val > 0.75 else (0, 165, 255)
+        cv2.rectangle(
+            display,
+            (loc[0], loc[1]),
+            (loc[0] + size[0], loc[1] + size[1]),
+            match_color, 2,
+        )
+        cv2.putText(
+            display,
+            f"tmpl: {score_val:.3f}",
+            (loc[0], loc[1] - 6),
+            cv2.FONT_HERSHEY_SIMPLEX, 0.5, match_color, 1,
+        )
+
+    # ── Draw text detection boxes ──
+    text_boxes = overlay.get("text_boxes", [])
+    for bbox, text, conf_val, matched in text_boxes:
+        color = (0, 255, 0) if matched else (128, 128, 128)
+        pts = np.array(bbox, dtype=np.int32)
+        cv2.polylines(display, [pts], True, color, 2)
+        cv2.putText(
+            display,
+            f"{text} ({conf_val:.2f})",
+            (pts[0][0], pts[0][1] - 6),
+            cv2.FONT_HERSHEY_SIMPLEX, 0.4, color, 1,
+        )
+
+    # ── Score bars on the right side ──
+    bar_x = w - 200
+    bar_w = 180
+    bar_h = 18
+    y_start = 20
+    bar_items = [
+        ("template", (180, 120, 0)),
+        ("text", (0, 140, 255)),
+        ("color", (0, 180, 0)),
+        ("brightness", (0, 180, 180)),
+        ("fade", (180, 0, 180)),
+        ("scene_change", (0, 100, 255)),
+    ]
+    conf = scores.get("confidence", 0)
+    threshold = detector.threshold
+
+    # Single ROI-based alpha blend for the entire panel background
+    panel_h = len(bar_items) * (bar_h + 4) + 8 + 24 + 22
+    px1 = max(0, bar_x - 4)
+    py1 = max(0, y_start - 4)
+    px2 = min(w, bar_x + bar_w + 4)
+    py2 = min(h, y_start + panel_h + 4)
+    roi = display[py1:py2, px1:px2]
+    dark = np.full_like(roi, (30, 30, 30), dtype=np.uint8)
+    cv2.addWeighted(roi, 0.3, dark, 0.7, 0, roi)
+
+    y_offset = y_start
+    for label, color in bar_items:
+        score_val = scores.get(label, 0)
+        is_conf = label in configured
+        if is_conf:
+            fill_w = int(bar_w * min(1.0, score_val))
+            cv2.rectangle(display, (bar_x, y_offset), (bar_x + fill_w, y_offset + bar_h), color, -1)
+        label_color = (255, 255, 255) if is_conf else (100, 100, 100)
+        txt = f"{label}: {score_val:.2f}" if is_conf else f"{label}: n/a"
+        cv2.putText(display, txt, (bar_x + 4, y_offset + 14), cv2.FONT_HERSHEY_SIMPLEX, 0.4, label_color, 1)
+        y_offset += bar_h + 4
+
+    # ── Confidence bar ──
+    y_offset += 4
+    conf_color = (0, 0, 255) if conf >= threshold else (100, 100, 100)
+    cv2.rectangle(
+        display, (bar_x, y_offset),
+        (bar_x + int(bar_w * min(1.0, conf)), y_offset + 24),
+        conf_color, -1,
+    )
+    tx = bar_x + int(bar_w * threshold)
+    cv2.line(display, (tx, y_offset), (tx, y_offset + 24), (0, 255, 255), 2)
+    cv2.putText(
+        display, f"CONF: {conf:.3f} (thr: {threshold})",
+        (bar_x + 4, y_offset + 18), cv2.FONT_HERSHEY_SIMPLEX, 0.4, (255, 255, 255), 1,
+    )
+
+    # ── Death flash ──
+    if overlay.get("death_flash_until", 0) > time.time():
+        cv2.rectangle(display, (0, 0), (w, h), (0, 0, 255), 8)
+        cv2.putText(
+            display, "DEATH DETECTED",
+            (w // 2 - 180, h // 2),
+            cv2.FONT_HERSHEY_SIMPLEX, 1.5, (0, 0, 255), 3,
+        )
+
+    return display
+
+
+# ---------------------------------------------------------------------------
+# Background detection loop — runs at detector speed (2-10fps)
 # ---------------------------------------------------------------------------
 
 
 def _detection_thread():
-    """Background thread that reads frames and runs detection."""
+    """Background thread that reads frames and runs detection (no overlay drawing)."""
     logger.info("Detection thread started")
-    from collections import deque
-    fps_timestamps: deque[float] = deque(maxlen=60)
 
     while not stop_event.is_set():
         with state_lock:
@@ -113,157 +257,39 @@ def _detection_thread():
             time.sleep(1)
             continue
 
-        frame = capture.read_frame()
+        frame = capture.get_latest_frame()
         if frame is None:
-            frame = capture.wait_for_frame(0.1)
-            if frame is None:
-                continue
+            time.sleep(0.05)
+            continue
 
         is_death, confidence = detector.analyze_frame(frame)
         scores = _get_scores(detector)
 
-        # Draw detection overlay on the frame
-        display = frame.copy()
-        h, w = display.shape[:2]
-        profile = detector.profile
+        # Build overlay state from detector results
+        match_loc = None
+        if hasattr(detector, '_last_match_loc') and detector._last_match_loc:
+            match_loc = detector._last_match_loc
+
+        text_boxes = []
+        if hasattr(detector, '_last_text_boxes') and detector._last_text_boxes:
+            text_boxes = list(detector._last_text_boxes)
+
         configured = scores.get("configured", [])
 
-        # ── Draw screen regions ──
-        if profile.screen_regions:
-            for region in profile.screen_regions:
-                x1 = int(region.x_min * w)
-                y1 = int(region.y_min * h)
-                x2 = int(region.x_max * w)
-                y2 = int(region.y_max * h)
-                cv2.rectangle(display, (x1, y1), (x2, y2), (187, 102, 255), 2)
-
-        # ── Draw color mask highlights (semi-transparent green) ──
-        if profile.dominant_colors and "color" in configured:
-            combined_mask = np.zeros((h, w), dtype=np.uint8)
-            for cr in profile.dominant_colors:
-                lower = np.array(cr.lower, dtype=np.uint8)
-                upper = np.array(cr.upper, dtype=np.uint8)
-                combined_mask |= cv2.inRange(frame, lower, upper)
-            idx = combined_mask > 0
-            if np.any(idx):
-                # Add green tint to matching pixels without full-frame alloc
-                pixels = display[idx].astype(np.int16)
-                pixels[:, 1] = np.clip(pixels[:, 1] + 40, 0, 255)
-                display[idx] = pixels.astype(np.uint8)
-
-        # ── Draw template match box (if detector tracked it) ──
-        if hasattr(detector, '_last_match_loc') and detector._last_match_loc:
-            loc, size, score_val = detector._last_match_loc
-            match_color = (0, 255, 0) if score_val > 0.75 else (0, 165, 255)
-            cv2.rectangle(
-                display,
-                (loc[0], loc[1]),
-                (loc[0] + size[0], loc[1] + size[1]),
-                match_color, 2,
-            )
-            cv2.putText(
-                display,
-                f"tmpl: {score_val:.3f}",
-                (loc[0], loc[1] - 6),
-                cv2.FONT_HERSHEY_SIMPLEX, 0.5, match_color, 1,
-            )
-
-        # ── Draw text detection boxes (if detector tracked them) ──
-        if hasattr(detector, '_last_text_boxes') and detector._last_text_boxes:
-            for bbox, text, conf_val, matched in detector._last_text_boxes:
-                color = (0, 255, 0) if matched else (128, 128, 128)
-                pts = np.array(bbox, dtype=np.int32)
-                cv2.polylines(display, [pts], True, color, 2)
-                cv2.putText(
-                    display,
-                    f"{text} ({conf_val:.2f})",
-                    (pts[0][0], pts[0][1] - 6),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.4, color, 1,
-                )
-
-        # ── Score bars on the right side ──
-        bar_x = w - 200
-        bar_w = 180
-        bar_h = 18
-        y_start = 20
-        bar_items = [
-            ("template", (180, 120, 0)),
-            ("text", (0, 140, 255)),
-            ("color", (0, 180, 0)),
-            ("brightness", (0, 180, 180)),
-            ("fade", (180, 0, 180)),
-            ("scene_change", (0, 100, 255)),
-        ]
-        conf = scores.get("confidence", 0)
-        threshold = detector.threshold
-
-        # Single ROI-based alpha blend for the entire panel background
-        panel_h = len(bar_items) * (bar_h + 4) + 8 + 24 + 22
-        px1 = max(0, bar_x - 4)
-        py1 = max(0, y_start - 4)
-        px2 = min(w, bar_x + bar_w + 4)
-        py2 = min(h, y_start + panel_h + 4)
-        roi = display[py1:py2, px1:px2]
-        dark = np.full_like(roi, (30, 30, 30), dtype=np.uint8)
-        cv2.addWeighted(roi, 0.3, dark, 0.7, 0, roi)
-
-        # Draw bar fills and labels directly (no per-bar frame copies)
-        y_offset = y_start
-        for label, color in bar_items:
-            score_val = scores.get(label, 0)
-            is_conf = label in configured
-            if is_conf:
-                fill_w = int(bar_w * min(1.0, score_val))
-                cv2.rectangle(display, (bar_x, y_offset), (bar_x + fill_w, y_offset + bar_h), color, -1)
-            label_color = (255, 255, 255) if is_conf else (100, 100, 100)
-            txt = f"{label}: {score_val:.2f}" if is_conf else f"{label}: n/a"
-            cv2.putText(display, txt, (bar_x + 4, y_offset + 14), cv2.FONT_HERSHEY_SIMPLEX, 0.4, label_color, 1)
-            y_offset += bar_h + 4
-
-        # ── Confidence bar ──
-        y_offset += 4
-        conf_color = (0, 0, 255) if conf >= threshold else (100, 100, 100)
-        cv2.rectangle(
-            display, (bar_x, y_offset),
-            (bar_x + int(bar_w * min(1.0, conf)), y_offset + 24),
-            conf_color, -1,
-        )
-        tx = bar_x + int(bar_w * threshold)
-        cv2.line(display, (tx, y_offset), (tx, y_offset + 24), (0, 255, 255), 2)
-        cv2.putText(
-            display, f"CONF: {conf:.3f} (thr: {threshold})",
-            (bar_x + 4, y_offset + 18), cv2.FONT_HERSHEY_SIMPLEX, 0.4, (255, 255, 255), 1,
-        )
-
-        # ── FPS counter ──
-        fps_timestamps.append(time.time())
-        if len(fps_timestamps) >= 2:
-            elapsed = fps_timestamps[-1] - fps_timestamps[0]
-            fps = (len(fps_timestamps) - 1) / elapsed if elapsed > 0 else 0
-        else:
-            fps = 0
-        y_offset += 28
-        cv2.putText(
-            display, f"{fps:.1f} fps",
-            (bar_x, y_offset + 14), cv2.FONT_HERSHEY_SIMPLEX, 0.4, (180, 180, 180), 1,
-        )
-
-        # ── Death flash ──
-        if is_death:
-            cv2.rectangle(display, (0, 0), (w, h), (0, 0, 255), 8)
-            cv2.putText(
-                display, "DEATH DETECTED",
-                (w // 2 - 180, h // 2),
-                cv2.FONT_HERSHEY_SIMPLEX, 1.5, (0, 0, 255), 3,
-            )
-
-        jpg = _encode_frame_jpg(display)
-
         with state_lock:
-            state["latest_frame_jpg"] = jpg
             state["latest_scores"] = scores
-            state["latest_confidence"] = conf
+            state["latest_confidence"] = confidence
             state["frame_count"] += 1
+
+            state["overlay_state"] = {
+                "scores": scores,
+                "confidence": confidence,
+                "is_death": is_death,
+                "death_flash_until": (time.time() + 1.0) if is_death else state["overlay_state"].get("death_flash_until", 0.0),
+                "match_loc": match_loc,
+                "text_boxes": text_boxes,
+                "configured": configured,
+            }
 
             if is_death:
                 session_count = counter.record_death(game, confidence)
@@ -275,6 +301,76 @@ def _detection_thread():
                 })
 
     logger.info("Detection thread stopped")
+
+
+# ---------------------------------------------------------------------------
+# Video encoding loop — runs at ~30fps
+# ---------------------------------------------------------------------------
+
+
+def _video_thread():
+    """Background thread that reads frames at ~30fps, draws overlays, feeds encoder."""
+    logger.info("Video thread started")
+    from collections import deque
+    fps_timestamps: deque[float] = deque(maxlen=60)
+    frame_interval = 1.0 / 30.0
+
+    while not stop_event.is_set():
+        loop_start = time.time()
+
+        with state_lock:
+            capture = state["capture"]
+            detector = state["detector"]
+            encoder = state["encoder"]
+            overlay = dict(state["overlay_state"])
+
+        if capture is None or detector is None or encoder is None:
+            time.sleep(0.1)
+            continue
+
+        if not capture.is_running():
+            time.sleep(0.1)
+            continue
+
+        frame = capture.get_latest_frame()
+        if frame is None:
+            time.sleep(0.01)
+            continue
+
+        # Draw overlays using cached detection results
+        display = _draw_overlays(frame, overlay, detector)
+
+        # FPS counter overlay
+        fps_timestamps.append(time.time())
+        if len(fps_timestamps) >= 2:
+            elapsed = fps_timestamps[-1] - fps_timestamps[0]
+            fps = (len(fps_timestamps) - 1) / elapsed if elapsed > 0 else 0
+        else:
+            fps = 0
+        h, w = display.shape[:2]
+        bar_x = w - 200
+        # Position below the score bars panel
+        y_fps = 20 + 6 * (18 + 4) + 8 + 24 + 28 + 4
+        cv2.putText(
+            display, f"{fps:.1f} fps",
+            (bar_x, y_fps + 14), cv2.FONT_HERSHEY_SIMPLEX, 0.4, (180, 180, 180), 1,
+        )
+
+        # Feed to fMP4 encoder for WebSocket streaming
+        encoder.feed_frame(display)
+
+        # Also encode JPEG for MJPEG fallback
+        jpg = _encode_frame_jpg(display)
+        with state_lock:
+            state["latest_frame_jpg"] = jpg
+
+        # Pace to ~30fps
+        elapsed = time.time() - loop_start
+        sleep_time = frame_interval - elapsed
+        if sleep_time > 0:
+            time.sleep(sleep_time)
+
+    logger.info("Video thread stopped")
 
 
 # ---------------------------------------------------------------------------
@@ -332,6 +428,10 @@ def api_start():
     counter = DeathCounter()
     counter.start_session(profile_name)
 
+    # Start fMP4 encoder
+    encoder = FMP4Encoder(width=1280, height=720, fps=30)
+    encoder.start()
+
     with state_lock:
         state["detector"] = detector
         state["capture"] = capture
@@ -343,11 +443,26 @@ def api_start():
         state["running"] = True
         state["death_log"] = []
         state["frame_count"] = 0
+        state["encoder"] = encoder
+        state["overlay_state"] = {
+            "scores": {},
+            "confidence": 0.0,
+            "is_death": False,
+            "death_flash_until": 0.0,
+            "match_loc": None,
+            "text_boxes": [],
+            "configured": [],
+        }
 
     stop_event.clear()
 
-    t = threading.Thread(target=_detection_thread, daemon=True)
-    t.start()
+    # Start detection thread (runs at detector speed)
+    td = threading.Thread(target=_detection_thread, daemon=True)
+    td.start()
+
+    # Start video thread (runs at ~30fps)
+    tv = threading.Thread(target=_video_thread, daemon=True)
+    tv.start()
 
     return jsonify({
         "status": "started",
@@ -452,7 +567,7 @@ def api_analyze_image():
 
 @app.route("/video_feed")
 def video_feed():
-    """MJPEG stream for live preview."""
+    """MJPEG stream for live preview (fallback)."""
     def generate():
         while True:
             with state_lock:
@@ -468,6 +583,58 @@ def video_feed():
         generate(),
         mimetype="multipart/x-mixed-replace; boundary=frame",
     )
+
+
+# ---------------------------------------------------------------------------
+# WebSocket route for fMP4 video streaming
+# ---------------------------------------------------------------------------
+
+
+@sock.route("/ws/video")
+def ws_video(ws):
+    """WebSocket endpoint: streams fMP4 init segment + media segments to client."""
+    with state_lock:
+        encoder = state.get("encoder")
+
+    if encoder is None:
+        ws.close()
+        return
+
+    # Wait for the init segment to become available
+    if not encoder.wait_for_init(timeout=10.0):
+        ws.close()
+        return
+
+    # Send init segment first
+    if encoder.init_segment:
+        try:
+            ws.send(encoder.init_segment)
+        except Exception:
+            return
+
+    # Register for media segments
+    client_queue = encoder.register_client()
+    try:
+        while True:
+            try:
+                segment = client_queue.get(timeout=5.0)
+            except Exception:
+                # Check if still running
+                with state_lock:
+                    if not state["running"]:
+                        break
+                continue
+
+            if segment is None:
+                # Sentinel — encoder stopped
+                break
+
+            try:
+                ws.send(segment)
+            except Exception:
+                break
+    finally:
+        encoder.unregister_client(client_queue)
 
 
 # ---------------------------------------------------------------------------
@@ -619,6 +786,9 @@ def _stop_capture() -> dict:
     stop_event.set()
     summary = {}
     with state_lock:
+        if state.get("encoder"):
+            state["encoder"].stop()
+            state["encoder"] = None
         if state["capture"]:
             state["capture"].stop()
             state["capture"] = None
