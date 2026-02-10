@@ -337,6 +337,11 @@ def _video_thread():
             time.sleep(0.01)
             continue
 
+        # Resize to encoder dimensions if needed
+        fh, fw = frame.shape[:2]
+        if fw != encoder.width or fh != encoder.height:
+            frame = cv2.resize(frame, (encoder.width, encoder.height))
+
         # Draw overlays using cached detection results
         display = _draw_overlays(frame, overlay, detector)
 
@@ -347,8 +352,7 @@ def _video_thread():
             fps = (len(fps_timestamps) - 1) / elapsed if elapsed > 0 else 0
         else:
             fps = 0
-        h, w = display.shape[:2]
-        bar_x = w - 200
+        bar_x = encoder.width - 200
         # Position below the score bars panel
         y_fps = 20 + 6 * (18 + 4) + 8 + 24 + 28 + 4
         cv2.putText(
@@ -358,11 +362,6 @@ def _video_thread():
 
         # Feed to fMP4 encoder for WebSocket streaming
         encoder.feed_frame(display)
-
-        # Also encode JPEG for MJPEG fallback
-        jpg = _encode_frame_jpg(display)
-        with state_lock:
-            state["latest_frame_jpg"] = jpg
 
         # Pace to ~30fps
         elapsed = time.time() - loop_start

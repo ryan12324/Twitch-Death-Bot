@@ -572,6 +572,7 @@ let mediaSource = null;
 let sourceBuffer = null;
 let segmentQueue = [];
 let mseSupported = false;
+let mseMaintTimer = null;
 
 // Check MSE + codec support
 const MSE_CODEC = 'video/mp4; codecs="avc1.42E01E"';
@@ -655,32 +656,40 @@ function startMSEStream() {
     sourceBuffer.mode = 'segments';
     segmentQueue = [];
 
+    // updateend: only flush queued segments — no pruning here
     sourceBuffer.addEventListener('updateend', () => {
-      // Flush queued segments
       if (segmentQueue.length > 0 && !sourceBuffer.updating) {
         sourceBuffer.appendBuffer(segmentQueue.shift());
       }
+    });
 
-      // Prune buffer: keep at most 10s behind playhead
+    // Separate maintenance timer for pruning + live-edge seeking
+    if (mseMaintTimer) clearInterval(mseMaintTimer);
+    mseMaintTimer = setInterval(() => {
+      if (!sourceBuffer || !mediaSource || mediaSource.readyState !== 'open') return;
+      if (sourceBuffer.updating) return;
+
+      // Prune: keep at most 4s behind playhead
       try {
-        if (video.currentTime > 10 && sourceBuffer.buffered.length > 0) {
-          const pruneEnd = video.currentTime - 10;
+        if (video.currentTime > 4 && sourceBuffer.buffered.length > 0) {
+          const pruneEnd = video.currentTime - 4;
           if (sourceBuffer.buffered.start(0) < pruneEnd) {
             sourceBuffer.remove(0, pruneEnd);
+            return; // remove is async, skip seek this tick
           }
         }
       } catch (e) { /* ignore */ }
 
-      // Auto-seek to live edge if >2s behind
+      // Auto-seek to live edge if >1s behind
       try {
         if (sourceBuffer.buffered.length > 0) {
           const liveEdge = sourceBuffer.buffered.end(sourceBuffer.buffered.length - 1);
-          if (liveEdge - video.currentTime > 2) {
-            video.currentTime = liveEdge - 0.1;
+          if (liveEdge - video.currentTime > 1) {
+            video.currentTime = liveEdge - 0.05;
           }
         }
       } catch (e) { /* ignore */ }
-    });
+    }, 2000);
 
     // Open WebSocket for fMP4 segments
     const wsProto = location.protocol === 'https:' ? 'wss:' : 'ws:';
@@ -691,13 +700,17 @@ function startMSEStream() {
       const data = new Uint8Array(event.data);
       if (!sourceBuffer || mediaSource.readyState !== 'open') return;
 
+      // Backpressure: if queue is too deep, drop oldest to stay near live
+      if (segmentQueue.length > 15) {
+        segmentQueue.splice(0, segmentQueue.length - 5);
+      }
+
       if (sourceBuffer.updating || segmentQueue.length > 0) {
         segmentQueue.push(data);
       } else {
         try {
           sourceBuffer.appendBuffer(data);
         } catch (e) {
-          console.error('appendBuffer error:', e);
           segmentQueue.push(data);
         }
       }
@@ -728,6 +741,7 @@ function fallbackToMJPEG() {
 }
 
 function cleanupMSE() {
+  if (mseMaintTimer) { clearInterval(mseMaintTimer); mseMaintTimer = null; }
   if (videoWs) {
     videoWs.close();
     videoWs = null;
