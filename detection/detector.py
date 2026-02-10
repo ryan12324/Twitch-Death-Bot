@@ -153,7 +153,7 @@ class DeathDetector:
 
         return scales
 
-    def _template_match_score(self, frame: np.ndarray, frame_gray: np.ndarray) -> float:
+    def _template_match_score(self, frame: np.ndarray, frame_gray: np.ndarray | None) -> float:
         """
         Slide each template across the frame at multiple scales.
         Returns the best match score (0-1). Uses pre-computed scaled
@@ -168,15 +168,23 @@ class DeathDetector:
             self._last_match_loc = None
             return 0.0
 
-        frame_h, frame_w = frame_gray.shape[:2]
-        frame_edges = cv2.Canny(frame_gray, 50, 150)
+        frame_h, frame_w = frame.shape[:2]
 
-        # Pre-extract search regions once (reused across all scales)
+        # When frame_gray is None (lazy grayscale mode), convert per-region
+        # or fall back to full-frame conversion if no regions.
+        if frame_gray is None and not self.profile.screen_regions:
+            frame_gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+
+        # Pre-extract search regions once (reused across all scales).
+        # Canny is computed per-region crop instead of full-frame — much cheaper
+        # when screen_regions are defined (e.g. 200x100 crop vs 1280x720).
         search_regions: list[tuple[np.ndarray, np.ndarray, int, int]] = []
+        full_frame_edges: np.ndarray | None = None  # lazily computed if no regions
         if self.profile.screen_regions:
             for region in self.profile.screen_regions:
-                roi_g = self._extract_region(frame_gray, region)
-                roi_e = self._extract_region(frame_edges, region)
+                roi_bgr = self._extract_region(frame, region)
+                roi_g = cv2.cvtColor(roi_bgr, cv2.COLOR_BGR2GRAY) if frame_gray is None else self._extract_region(frame_gray, region)
+                roi_e = cv2.Canny(roi_g, 50, 150)
                 ox = int(region.x_min * frame_w)
                 oy = int(region.y_min * frame_h)
                 search_regions.append((roi_g, roi_e, ox, oy))
@@ -213,7 +221,10 @@ class DeathDetector:
                             search_areas.append((roi_g, roi_e, ox, oy))
 
                 if not search_areas:
-                    search_areas = [(frame_gray, frame_edges, 0, 0)]
+                    # No regions defined — fall back to full-frame Canny (computed once)
+                    if full_frame_edges is None:
+                        full_frame_edges = cv2.Canny(frame_gray, 50, 150)
+                    search_areas = [(frame_gray, full_frame_edges, 0, 0)]
 
                 for area_g, area_e, ox, oy in search_areas:
                     # Pixel-based match
@@ -280,7 +291,7 @@ class DeathDetector:
         logger.debug("color_analysis: final score=%.4f", max_ratio)
         return max_ratio
 
-    def _brightness_score(self, frame: np.ndarray, frame_gray: np.ndarray) -> float:
+    def _brightness_score(self, frame: np.ndarray, frame_gray: np.ndarray | None) -> float:
         """Score based on overall brightness matching death screen profile.
 
         When screen_regions are defined, computes the mean brightness across
@@ -289,10 +300,16 @@ class DeathDetector:
         if self.profile.screen_regions:
             brightness_values = []
             for region in self.profile.screen_regions:
-                crop_gray = self._extract_region(frame_gray, region)
+                if frame_gray is not None:
+                    crop_gray = self._extract_region(frame_gray, region)
+                else:
+                    crop_bgr = self._extract_region(frame, region)
+                    crop_gray = cv2.cvtColor(crop_bgr, cv2.COLOR_BGR2GRAY)
                 brightness_values.append(np.mean(crop_gray))
             mean_brightness = float(np.mean(brightness_values))
         else:
+            if frame_gray is None:
+                frame_gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
             mean_brightness = float(np.mean(frame_gray))
 
         score = 0.0
@@ -319,10 +336,15 @@ class DeathDetector:
 
         lower = np.array(self.profile.fade_to_color.lower, dtype=np.uint8)
         upper = np.array(self.profile.fade_to_color.upper, dtype=np.uint8)
-        mask = cv2.inRange(frame, lower, upper)
 
-        total_pixels = frame.shape[0] * frame.shape[1]
-        fade_ratio = np.count_nonzero(mask) / total_pixels
+        if self.profile.screen_regions:
+            areas = [self._extract_region(frame, r) for r in self.profile.screen_regions]
+        else:
+            areas = [frame]
+
+        total_pixels = sum(a.shape[0] * a.shape[1] for a in areas)
+        fade_pixels = sum(np.count_nonzero(cv2.inRange(a, lower, upper)) for a in areas)
+        fade_ratio = fade_pixels / total_pixels
 
         if fade_ratio > 0.85:
             score = fade_ratio
@@ -441,19 +463,29 @@ class DeathDetector:
         frame = self._normalize_frame(frame)
         now = time.time()
 
-        # Compute grayscale once — shared across template, brightness, scene_change
-        frame_gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+        # When screen_regions are defined, skip the expensive full-frame
+        # grayscale conversion.  Individual methods convert their own region
+        # crops to gray internally.  We only need a small 320x240 grayscale
+        # for scene_change_score (which resizes to that size anyway).
+        if self.profile.screen_regions:
+            frame_gray = None  # lazy — methods convert per-region as needed
+            frame_gray_small = cv2.cvtColor(
+                cv2.resize(frame, (320, 240)), cv2.COLOR_BGR2GRAY
+            )
+        else:
+            frame_gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+            frame_gray_small = frame_gray  # _scene_change_score will resize
 
         # Check cooldown
         if now - self.last_detection_time < self.cooldown:
-            self.previous_frame = frame_gray
+            self.previous_frame = frame_gray_small
             return False, 0.0
 
         # --- Cheap signals first (fast: color mask, brightness mean, fade mask, scene diff) ---
         color_score = self._color_analysis_score(frame)
         brightness_score = self._brightness_score(frame, frame_gray)
         fade_score = self._fade_detection_score(frame)
-        scene_change = self._scene_change_score(frame_gray)
+        scene_change = self._scene_change_score(frame_gray_small)
 
         # --- Medium cost: template matching (fast with pre-computed cache) ---
         template_score = self._template_match_score(frame, frame_gray)
@@ -517,8 +549,8 @@ class DeathDetector:
             "configured": list(configured.keys()),
         }
 
-        # Store grayscale only — saves memory and avoids redundant conversions
-        self.previous_frame = frame_gray
+        # Store small grayscale for scene_change_score — saves memory
+        self.previous_frame = frame_gray_small
 
         # Require consecutive frames to reduce false positives
         if confidence >= self.threshold:
