@@ -503,6 +503,8 @@ class DeathDetector:
             configured["brightness"] = brightness_score
         if self.profile.fade_to_color is not None:
             configured["fade"] = fade_score
+        if self.previous_frame is not None:
+            configured["scene_change"] = scene_change
 
         # Collect weights for configured signals only
         profile_weights = self.profile.weights or {}
@@ -529,17 +531,6 @@ class DeathDetector:
             "weighting: configured=%s raw_weights=%s normalized=%s",
             list(configured.keys()), active, normalized,
         )
-
-        # Scene change is a bonus for transitions, never a penalty.
-        # Death screens persist across multiple frames, so low scene change
-        # on the second/third frame should not drag confidence down.
-        if self.previous_frame is not None and scene_change > 0.3:
-            old_conf = confidence
-            confidence = min(1.0, confidence + scene_change * 0.05)
-            logger.info(
-                "scene bonus: %.4f -> %.4f (scene=%.4f)",
-                old_conf, confidence, scene_change,
-            )
 
         # Store individual scores for the web GUI
         self.last_scores = {

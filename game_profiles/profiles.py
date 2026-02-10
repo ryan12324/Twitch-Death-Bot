@@ -21,6 +21,7 @@ DEFAULT_WEIGHTS: dict[str, float] = {
     "color": 3.0,
     "brightness": 2.0,
     "fade": 3.0,
+    "scene_change": 1.0,
 }
 
 

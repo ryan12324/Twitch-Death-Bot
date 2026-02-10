@@ -52,5 +52,5 @@
   "min_brightness": null,
   "cooldown_override": null,
   "text_indicators": ["YOU DIED", "DEATH", "GAME OVER", "WASTED"],
-  "weights": {"template": 5, "text": 4, "color": 3, "brightness": 2, "fade": 3}
+  "weights": {"template": 5, "text": 4, "color": 3, "brightness": 2, "fade": 3, "scene_change": 1}
 }

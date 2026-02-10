@@ -40,5 +40,5 @@
   "min_brightness": null,
   "cooldown_override": 10,
   "text_indicators": [],
-  "weights": {"template": 5, "color": 3, "brightness": 3, "fade": 4}
+  "weights": {"template": 5, "color": 3, "brightness": 3, "fade": 4, "scene_change": 1}
 }

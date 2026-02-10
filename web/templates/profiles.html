@@ -881,6 +881,11 @@
             <input type="range" id="wFade" min="0" max="10" step="1" value="3" oninput="updateWeightVal('fade')">
             <span class="slider-val" id="wFadeVal">3</span>
           </div>
+          <div class="slider-row">
+            <label style="min-width:90px">Scene Change</label>
+            <input type="range" id="wScene_change" min="0" max="10" step="1" value="1" oninput="updateWeightVal('scene_change')">
+            <span class="slider-val" id="wScene_changeVal">1</span>
+          </div>
           <button class="btn btn-secondary" onclick="resetWeightsToDefaults()" style="margin-top:8px;width:auto;padding:8px 16px">Reset to Defaults</button>
         </div>
       </div>
@@ -956,7 +961,7 @@ let meanBrightness = null;
 let signalWeights = {};
 let debugImageData = {};
 
-const DEFAULT_WEIGHTS = {template: 5, text: 4, color: 3, brightness: 2, fade: 3};
+const DEFAULT_WEIGHTS = {template: 5, text: 4, color: 3, brightness: 2, fade: 3, scene_change: 1};
 
 // ═══════════════════════════════════════════════════════════════
 // INIT
