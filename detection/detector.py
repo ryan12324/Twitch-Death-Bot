@@ -19,6 +19,7 @@ from pathlib import Path
 import cv2
 import numpy as np
 
+from detection.audio_detector import AudioDetector
 from game_profiles.profiles import DEFAULT_WEIGHTS, GameProfile, ScreenRegion
 
 logger = logging.getLogger(__name__)
@@ -42,6 +43,7 @@ class DeathDetector:
         threshold: float = 0.80,
         cooldown: int = 15,
         required_consecutive: int = 2,
+        audio_detector: AudioDetector | None = None,
     ):
         self.profile = profile
         self.threshold = threshold
@@ -52,14 +54,16 @@ class DeathDetector:
         self.previous_frame: np.ndarray | None = None
         self.death_frame_count: int = 0
         self.required_consecutive: int = required_consecutive
+        self.audio_detector: AudioDetector | None = audio_detector
 
         # Last computed individual scores (populated by analyze_frame)
         self.last_scores: dict[str, float] = {}
 
         logger.info(
             "DeathDetector init: profile=%s threshold=%.2f cooldown=%d "
-            "required_consecutive=%d",
+            "required_consecutive=%d audio=%s",
             profile.display_name, threshold, self.cooldown, required_consecutive,
+            "enabled" if audio_detector else "disabled",
         )
 
         self._load_templates()
@@ -569,6 +573,11 @@ class DeathDetector:
         # --- Medium cost: template matching (fast with pre-computed cache) ---
         template_score = self._template_match_score(frame, frame_gray) if self.templates and _weight("template") > 0 else 0.0
 
+        # --- Audio detection (runs in parallel via the audio thread) ---
+        audio_score = 0.0
+        if self.audio_detector and _weight("audio") > 0:
+            audio_score = self.audio_detector.get_score()
+
         # --- Expensive: OCR. Gate behind cheaper signals. ---
         # Only run OCR when cheaper signals strongly suggest a death,
         # unless text is the only configured signal for this profile.
@@ -580,7 +589,7 @@ class DeathDetector:
                 or self.profile.min_brightness is not None
                 or self.profile.fade_to_color is not None
             )
-            gate_score = max(template_score, color_score, brightness_score, fade_score)
+            gate_score = max(template_score, color_score, brightness_score, fade_score, audio_score)
             if not has_cheap_signals or gate_score > 0.5:
                 text_score = self._text_detection_score(frame)
             else:
@@ -602,6 +611,8 @@ class DeathDetector:
             configured["fade"] = fade_score
         if self.previous_frame is not None and _weight("scene_change") > 0:
             configured["scene_change"] = scene_change
+        if self.audio_detector and _weight("audio") > 0:
+            configured["audio"] = audio_score
 
         # Collect weights for configured signals only
         active: dict[str, float] = {}
@@ -626,6 +637,7 @@ class DeathDetector:
             "brightness": round(brightness_score, 4),
             "fade": round(fade_score, 4),
             "scene_change": round(scene_change, 4),
+            "audio": round(audio_score, 4),
             "confidence": round(confidence, 4),
             "configured": list(configured.keys()),
         }
@@ -653,7 +665,7 @@ class DeathDetector:
             self.death_frame_count = 0
             logger.info(
                 "DEATH DETECTED! Confidence: %.2f (template=%.2f, text=%.2f, color=%.2f, "
-                "brightness=%.2f, fade=%.2f, scene_change=%.2f)",
+                "brightness=%.2f, fade=%.2f, scene_change=%.2f, audio=%.2f)",
                 confidence,
                 template_score,
                 text_score,
@@ -661,6 +673,7 @@ class DeathDetector:
                 brightness_score,
                 fade_score,
                 scene_change,
+                audio_score,
             )
 
         return is_death, confidence

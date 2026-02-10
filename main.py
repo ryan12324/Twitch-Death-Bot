@@ -17,6 +17,8 @@ from pathlib import Path
 from dotenv import load_dotenv
 
 from bot.twitch_bot import DeathBot
+from detection.audio_capture import AudioCapture
+from detection.audio_detector import AudioDetector
 from detection.clip_recorder import ClipRecorder
 from detection.counter import DeathCounter
 from detection.detector import DeathDetector
@@ -151,10 +153,35 @@ def main() -> None:
     counter = DeathCounter()
     counter.start_session(config["game"])
 
+    # Set up audio detection if the profile has audio samples
+    audio_detector: AudioDetector | None = None
+    audio_capture: AudioCapture | None = None
+    if profile.audio_samples_dir:
+        audio_detector = AudioDetector(profile.audio_samples_dir)
+        if audio_detector.reference_specs:
+            audio_capture = AudioCapture(
+                channel=config["channel"],
+                quality="worst",
+            )
+            logger.info(
+                "Audio detection enabled (%d reference sound(s))",
+                len(audio_detector.reference_specs),
+            )
+        else:
+            logger.warning(
+                "Profile has audio_samples_dir='%s' but no WAV files found — "
+                "audio detection disabled. Add .wav files to "
+                "game_profiles/audio_samples/%s/",
+                profile.audio_samples_dir,
+                profile.audio_samples_dir,
+            )
+            audio_detector = None
+
     detector = DeathDetector(
         profile=profile,
         threshold=config["threshold"],
         cooldown=config["cooldown"],
+        audio_detector=audio_detector,
     )
 
     capture = StreamCapture(
@@ -188,6 +215,8 @@ def main() -> None:
         logger.info("Shutting down...")
         stop_event.set()
         capture.stop()
+        if audio_capture is not None:
+            audio_capture.stop()
         summary = counter.end_session()
         logger.info(
             "Session summary: %d deaths this stream, %d total all-time",
@@ -205,6 +234,13 @@ def main() -> None:
         )
         logger.info("Starting bot in chat-only mode (no detection).")
         logger.info("Detection will start when the stream goes live.")
+
+    # Start audio capture (separate lightweight stream connection)
+    if audio_capture is not None and audio_detector is not None:
+        if audio_capture.start(audio_detector.feed_audio):
+            logger.info("Audio capture started")
+        else:
+            logger.warning("Audio capture failed to start — audio detection disabled")
 
     # Start detection in background thread
     loop = asyncio.new_event_loop()

@@ -22,6 +22,7 @@ DEFAULT_WEIGHTS: dict[str, float] = {
     "brightness": 2.0,
     "fade": 3.0,
     "scene_change": 1.0,
+    "audio": 0.0,
 }
 
 
@@ -61,6 +62,8 @@ class GameProfile:
     min_brightness: int | None = None
     # Text strings to look for via OCR (e.g. "YOU DIED")
     text_indicators: list[str] = field(default_factory=list)
+    # Directory name for audio sample files (under game_profiles/audio_samples/)
+    audio_samples_dir: str = ""
     # Per-signal weights for confidence calculation
     weights: dict[str, float] = field(default_factory=dict)
 
@@ -97,6 +100,7 @@ def _parse_profile(data: dict) -> GameProfile:
         min_brightness=data.get("min_brightness"),
         cooldown_override=data.get("cooldown_override"),
         text_indicators=data.get("text_indicators", []),
+        audio_samples_dir=data.get("audio_samples_dir", ""),
         weights=data.get("weights", {}),
     )
 
@@ -120,6 +124,7 @@ def profile_to_dict(profile: GameProfile) -> dict:
         "min_brightness": profile.min_brightness,
         "cooldown_override": profile.cooldown_override,
         "text_indicators": profile.text_indicators,
+        "audio_samples_dir": profile.audio_samples_dir,
         "weights": profile.weights,
     }
 
