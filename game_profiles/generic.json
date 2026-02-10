@@ -1,0 +1,54 @@
+{
+  "name": "generic",
+  "display_name": "Generic (Any Game)",
+  "template_dir": "generic",
+  "screen_regions": [
+    {
+      "x_min": 0.15,
+      "y_min": 0.2,
+      "x_max": 0.85,
+      "y_max": 0.8
+    }
+  ],
+  "dominant_colors": [
+    {
+      "lower": [
+        0,
+        0,
+        0
+      ],
+      "upper": [
+        45,
+        45,
+        45
+      ]
+    },
+    {
+      "lower": [
+        0,
+        0,
+        80
+      ],
+      "upper": [
+        60,
+        60,
+        220
+      ]
+    }
+  ],
+  "fade_to_color": {
+    "lower": [
+      0,
+      0,
+      0
+    ],
+    "upper": [
+      45,
+      45,
+      45
+    ]
+  },
+  "max_brightness": 50,
+  "min_brightness": null,
+  "cooldown_override": null
+}

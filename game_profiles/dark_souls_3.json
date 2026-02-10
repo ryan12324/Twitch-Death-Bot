@@ -1,0 +1,54 @@
+{
+  "name": "dark_souls_3",
+  "display_name": "Dark Souls III",
+  "template_dir": "dark_souls_3",
+  "screen_regions": [
+    {
+      "x_min": 0.25,
+      "y_min": 0.35,
+      "x_max": 0.75,
+      "y_max": 0.65
+    }
+  ],
+  "dominant_colors": [
+    {
+      "lower": [
+        0,
+        0,
+        120
+      ],
+      "upper": [
+        60,
+        60,
+        255
+      ]
+    },
+    {
+      "lower": [
+        0,
+        0,
+        0
+      ],
+      "upper": [
+        40,
+        40,
+        40
+      ]
+    }
+  ],
+  "fade_to_color": {
+    "lower": [
+      0,
+      0,
+      0
+    ],
+    "upper": [
+      40,
+      40,
+      40
+    ]
+  },
+  "max_brightness": 55,
+  "min_brightness": null,
+  "cooldown_override": null
+}

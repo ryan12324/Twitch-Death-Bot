@@ -1,0 +1,1532 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Death Detector - Profile Builder</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;700&family=Outfit:wght@300;400;500;600;700;800&display=swap');
+
+  :root {
+    --bg: #0a0a0c;
+    --surface: #111114;
+    --surface2: #1a1a1f;
+    --surface3: #222228;
+    --border: #2a2a32;
+    --border-hover: #3a3a44;
+    --text: #e8e8ec;
+    --text-dim: #8888a0;
+    --text-muted: #55556a;
+    --accent: #9147ff;
+    --accent-hover: #a366ff;
+    --accent-dim: rgba(145, 71, 255, 0.15);
+    --accent-glow: rgba(145, 71, 255, 0.3);
+    --red: #ff4455;
+    --red-dim: rgba(255, 68, 85, 0.15);
+    --green: #22cc66;
+    --green-dim: rgba(34, 204, 102, 0.15);
+    --yellow: #ffaa22;
+    --yellow-dim: rgba(255, 170, 34, 0.12);
+    --cyan: #44ccee;
+    --region-color: #bb66ff;
+    --sidebar-w: 260px;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    font-family: 'Outfit', sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    min-height: 100vh;
+    overflow: hidden;
+  }
+
+  /* ── Nav ── */
+  nav {
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+    padding: 0 24px;
+    height: 52px;
+    display: flex;
+    align-items: center;
+    gap: 20px;
+    z-index: 100;
+    position: relative;
+  }
+  nav .logo {
+    font-family: 'Outfit', sans-serif;
+    font-size: 18px;
+    font-weight: 800;
+    color: var(--red);
+    text-decoration: none;
+    letter-spacing: -0.5px;
+  }
+  nav .logo span { color: var(--text); }
+  nav a.nav-link {
+    color: var(--text-dim);
+    text-decoration: none;
+    font-size: 13px;
+    font-weight: 500;
+    padding: 6px 12px;
+    border-radius: 6px;
+    transition: all 0.15s;
+  }
+  nav a.nav-link:hover { color: var(--text); background: var(--surface2); }
+  nav a.nav-link.active { color: var(--accent); }
+
+  /* ── Layout ── */
+  .layout {
+    display: flex;
+    height: calc(100vh - 52px);
+  }
+
+  /* ── Sidebar ── */
+  .sidebar {
+    width: var(--sidebar-w);
+    min-width: var(--sidebar-w);
+    background: var(--surface);
+    border-right: 1px solid var(--border);
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+  .sidebar-header {
+    padding: 16px;
+    border-bottom: 1px solid var(--border);
+  }
+  .sidebar-header h2 {
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 1.5px;
+    color: var(--text-muted);
+    margin-bottom: 12px;
+  }
+  .profile-list {
+    flex: 1;
+    overflow-y: auto;
+    padding: 8px;
+  }
+  .profile-item {
+    padding: 10px 14px;
+    border-radius: 8px;
+    cursor: pointer;
+    font-size: 13px;
+    font-weight: 500;
+    color: var(--text-dim);
+    transition: all 0.12s;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 2px;
+  }
+  .profile-item:hover { background: var(--surface2); color: var(--text); }
+  .profile-item.active {
+    background: var(--accent-dim);
+    color: var(--accent-hover);
+    font-weight: 600;
+  }
+  .profile-item .dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: var(--border);
+    flex-shrink: 0;
+  }
+  .profile-item.active .dot { background: var(--accent); box-shadow: 0 0 8px var(--accent-glow); }
+  .sidebar-footer {
+    padding: 12px;
+    border-top: 1px solid var(--border);
+  }
+  .btn-new-profile {
+    width: 100%;
+    padding: 10px;
+    background: var(--surface2);
+    border: 1px dashed var(--border);
+    border-radius: 8px;
+    color: var(--text-dim);
+    font-family: 'Outfit', sans-serif;
+    font-size: 13px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.15s;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+  }
+  .btn-new-profile:hover { border-color: var(--accent); color: var(--accent); background: var(--accent-dim); }
+
+  /* ── Editor ── */
+  .editor {
+    flex: 1;
+    overflow-y: auto;
+    overflow-x: hidden;
+    padding: 24px 32px;
+    scrollbar-width: thin;
+    scrollbar-color: var(--border) transparent;
+  }
+  .editor::-webkit-scrollbar { width: 6px; }
+  .editor::-webkit-scrollbar-track { background: transparent; }
+  .editor::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+
+  .editor-empty {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    height: 100%;
+    color: var(--text-muted);
+    font-size: 15px;
+    flex-direction: column;
+    gap: 8px;
+  }
+  .editor-empty svg { opacity: 0.3; }
+
+  /* ── Section blocks ── */
+  .section {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    margin-bottom: 16px;
+    overflow: hidden;
+  }
+  .section-head {
+    padding: 14px 18px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    cursor: pointer;
+    user-select: none;
+    transition: background 0.1s;
+  }
+  .section-head:hover { background: var(--surface2); }
+  .section-head h3 {
+    font-size: 13px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    color: var(--text-dim);
+    flex: 1;
+  }
+  .section-head .chevron {
+    color: var(--text-muted);
+    transition: transform 0.2s;
+    font-size: 12px;
+  }
+  .section.collapsed .section-body { display: none; }
+  .section.collapsed .chevron { transform: rotate(-90deg); }
+  .section-body { padding: 4px 18px 18px; }
+
+  /* ── Form fields ── */
+  .field-row {
+    display: flex;
+    gap: 12px;
+    margin-bottom: 12px;
+  }
+  .field {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+  }
+  .field label {
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.8px;
+    color: var(--text-muted);
+  }
+  .field input, .field select {
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 8px 12px;
+    color: var(--text);
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 13px;
+    outline: none;
+    transition: border-color 0.15s;
+  }
+  .field input:focus, .field select:focus {
+    border-color: var(--accent);
+    box-shadow: 0 0 0 2px var(--accent-dim);
+  }
+  .field input::placeholder { color: var(--text-muted); }
+
+  /* ── Canvas area ── */
+  .canvas-container {
+    position: relative;
+    background: #000;
+    border-radius: 8px;
+    overflow: hidden;
+    margin-bottom: 12px;
+    border: 1px solid var(--border);
+    min-height: 200px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  .canvas-placeholder {
+    color: var(--text-muted);
+    font-size: 13px;
+    text-align: center;
+    padding: 40px;
+    cursor: pointer;
+    width: 100%;
+  }
+  .canvas-placeholder:hover { color: var(--text-dim); }
+  .canvas-stack {
+    position: relative;
+    display: none;
+    width: 100%;
+  }
+  .canvas-stack canvas {
+    display: block;
+    width: 100%;
+    height: auto;
+  }
+  #overlayCanvas {
+    position: absolute;
+    top: 0;
+    left: 0;
+    cursor: crosshair;
+  }
+
+  .canvas-toolbar {
+    display: flex;
+    gap: 6px;
+    margin-bottom: 12px;
+    flex-wrap: wrap;
+    align-items: center;
+  }
+  .tool-btn {
+    padding: 6px 14px;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    background: var(--surface2);
+    color: var(--text-dim);
+    font-family: 'Outfit', sans-serif;
+    font-size: 12px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.12s;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .tool-btn:hover { border-color: var(--accent); color: var(--text); }
+  .tool-btn.active { background: var(--accent-dim); border-color: var(--accent); color: var(--accent-hover); }
+  .tool-sep {
+    width: 1px;
+    height: 20px;
+    background: var(--border);
+    margin: 0 4px;
+  }
+  .canvas-info {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    color: var(--text-muted);
+    margin-left: auto;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  /* ── Color swatch popup ── */
+  .color-popup {
+    display: none;
+    position: absolute;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 14px;
+    z-index: 50;
+    box-shadow: 0 8px 32px rgba(0,0,0,0.5);
+    min-width: 220px;
+  }
+  .color-popup.show { display: block; }
+  .color-popup .swatch-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 10px;
+  }
+  .color-popup .swatch {
+    width: 36px;
+    height: 36px;
+    border-radius: 6px;
+    border: 2px solid var(--border);
+  }
+  .color-popup .swatch-info {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 12px;
+    color: var(--text-dim);
+    line-height: 1.5;
+  }
+  .color-popup .tolerance-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 12px;
+    font-size: 12px;
+    color: var(--text-dim);
+  }
+  .color-popup .tolerance-row input[type="range"] {
+    flex: 1;
+    accent-color: var(--accent);
+  }
+  .color-popup .tolerance-row .val {
+    font-family: 'JetBrains Mono', monospace;
+    min-width: 28px;
+    text-align: right;
+  }
+  .color-popup .popup-btns {
+    display: flex;
+    gap: 6px;
+  }
+  .color-popup .popup-btns button {
+    flex: 1;
+    padding: 7px;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    background: var(--surface2);
+    color: var(--text-dim);
+    font-family: 'Outfit', sans-serif;
+    font-size: 11px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.12s;
+  }
+  .color-popup .popup-btns button:hover { border-color: var(--accent); color: var(--text); }
+  .color-popup .popup-btns button.primary { background: var(--accent-dim); border-color: var(--accent); color: var(--accent-hover); }
+
+  /* ── Region / Color list items ── */
+  .list-item {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 8px 12px;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    margin-bottom: 6px;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 12px;
+    color: var(--text-dim);
+  }
+  .list-item .color-swatch {
+    width: 18px;
+    height: 18px;
+    border-radius: 4px;
+    border: 1px solid var(--border);
+    flex-shrink: 0;
+  }
+  .list-item .remove-btn {
+    margin-left: auto;
+    background: none;
+    border: none;
+    color: var(--text-muted);
+    cursor: pointer;
+    font-size: 14px;
+    padding: 2px 6px;
+    border-radius: 4px;
+    transition: all 0.1s;
+  }
+  .list-item .remove-btn:hover { color: var(--red); background: var(--red-dim); }
+  .empty-list {
+    font-size: 12px;
+    color: var(--text-muted);
+    font-style: italic;
+    padding: 8px 0;
+  }
+
+  /* ── Brightness ── */
+  .brightness-bar-container {
+    position: relative;
+    height: 28px;
+    background: linear-gradient(to right, #000, #fff);
+    border-radius: 6px;
+    margin: 12px 0 8px;
+    border: 1px solid var(--border);
+    overflow: visible;
+  }
+  .brightness-marker {
+    position: absolute;
+    top: -4px;
+    width: 3px;
+    height: 36px;
+    border-radius: 2px;
+    z-index: 2;
+  }
+  .brightness-marker.mean { background: var(--cyan); }
+  .brightness-marker.max-mark { background: var(--red); }
+  .brightness-marker.min-mark { background: var(--green); }
+  .brightness-marker-label {
+    position: absolute;
+    top: -18px;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 9px;
+    transform: translateX(-50%);
+    left: 50%;
+    white-space: nowrap;
+  }
+
+  .slider-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 8px;
+  }
+  .slider-row input[type="checkbox"] { accent-color: var(--accent); }
+  .slider-row label {
+    font-size: 12px;
+    color: var(--text-dim);
+    min-width: 110px;
+    font-weight: 500;
+  }
+  .slider-row input[type="range"] {
+    flex: 1;
+    accent-color: var(--accent);
+  }
+  .slider-row .slider-val {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 12px;
+    color: var(--text-dim);
+    min-width: 32px;
+    text-align: right;
+  }
+
+  /* ── Template images ── */
+  .template-grid {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-top: 8px;
+  }
+  .template-thumb {
+    width: 80px;
+    height: 60px;
+    border-radius: 6px;
+    border: 1px solid var(--border);
+    object-fit: cover;
+    background: var(--bg);
+  }
+  .template-upload-zone {
+    border: 1px dashed var(--border);
+    border-radius: 6px;
+    padding: 12px;
+    text-align: center;
+    cursor: pointer;
+    font-size: 12px;
+    color: var(--text-muted);
+    transition: all 0.15s;
+    margin-top: 8px;
+  }
+  .template-upload-zone:hover { border-color: var(--accent); color: var(--accent); }
+  .template-upload-zone input { display: none; }
+
+  /* ── Action bar ── */
+  .action-bar {
+    display: flex;
+    gap: 10px;
+    margin-top: 8px;
+    padding-top: 16px;
+    border-top: 1px solid var(--border);
+  }
+  .btn {
+    padding: 10px 22px;
+    border: none;
+    border-radius: 8px;
+    font-family: 'Outfit', sans-serif;
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.15s;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .btn-accent { background: var(--accent); color: white; }
+  .btn-accent:hover { background: var(--accent-hover); transform: translateY(-1px); box-shadow: 0 4px 16px var(--accent-glow); }
+  .btn-danger { background: var(--red-dim); color: var(--red); border: 1px solid transparent; }
+  .btn-danger:hover { border-color: var(--red); }
+  .btn-secondary { background: var(--surface2); color: var(--text-dim); border: 1px solid var(--border); }
+  .btn-secondary:hover { border-color: var(--accent); color: var(--text); }
+  .btn:disabled { opacity: 0.4; pointer-events: none; }
+
+  /* ── Test Results ── */
+  .test-results {
+    display: none;
+    margin-top: 16px;
+  }
+  .test-results.show { display: block; }
+  .test-verdict {
+    padding: 12px 16px;
+    border-radius: 8px;
+    font-weight: 700;
+    font-size: 15px;
+    margin-bottom: 12px;
+  }
+  .test-verdict.death { background: var(--red-dim); color: var(--red); }
+  .test-verdict.no-death { background: var(--green-dim); color: var(--green); }
+  .test-scores {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 6px;
+    margin-bottom: 12px;
+  }
+  .test-score {
+    display: flex;
+    justify-content: space-between;
+    padding: 6px 10px;
+    background: var(--bg);
+    border-radius: 4px;
+    font-size: 12px;
+  }
+  .test-score .name { color: var(--text-muted); }
+  .test-score .val { font-family: 'JetBrains Mono', monospace; font-weight: 600; }
+
+  .debug-tabs-row {
+    display: flex;
+    gap: 4px;
+    margin-bottom: 8px;
+    flex-wrap: wrap;
+  }
+  .debug-tab-btn {
+    padding: 5px 12px;
+    border: 1px solid var(--border);
+    border-radius: 5px;
+    background: var(--surface2);
+    color: var(--text-muted);
+    font-family: 'Outfit', sans-serif;
+    font-size: 11px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.12s;
+  }
+  .debug-tab-btn:hover { color: var(--text); }
+  .debug-tab-btn.active { background: var(--accent-dim); border-color: var(--accent); color: var(--accent-hover); }
+  .debug-img-wrap {
+    background: #000;
+    border-radius: 8px;
+    overflow: hidden;
+    border: 1px solid var(--border);
+  }
+  .debug-img-wrap img {
+    width: 100%;
+    display: block;
+  }
+
+  /* ── Toast ── */
+  .toast {
+    position: fixed;
+    bottom: 24px;
+    right: 24px;
+    padding: 12px 20px;
+    border-radius: 8px;
+    font-size: 13px;
+    font-weight: 600;
+    z-index: 1000;
+    transform: translateY(80px);
+    opacity: 0;
+    transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+    pointer-events: none;
+  }
+  .toast.show { transform: translateY(0); opacity: 1; }
+  .toast.success { background: var(--green-dim); color: var(--green); border: 1px solid var(--green); }
+  .toast.error { background: var(--red-dim); color: var(--red); border: 1px solid var(--red); }
+
+  /* ── Fade color section ── */
+  .fade-color-display {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 8px 12px;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 12px;
+    color: var(--text-dim);
+    margin-bottom: 6px;
+  }
+  .fade-color-display .remove-btn {
+    margin-left: auto;
+    background: none;
+    border: none;
+    color: var(--text-muted);
+    cursor: pointer;
+    font-size: 14px;
+    padding: 2px 6px;
+    border-radius: 4px;
+  }
+  .fade-color-display .remove-btn:hover { color: var(--red); background: var(--red-dim); }
+</style>
+</head>
+<body>
+
+<nav>
+  <a href="/" class="logo"><span>Death</span>Detector</a>
+  <div style="flex:1"></div>
+  <a href="/" class="nav-link">Home</a>
+  <a href="/test" class="nav-link">Test</a>
+  <a href="/profiles" class="nav-link active">Profiles</a>
+</nav>
+
+<div class="layout">
+  <!-- Sidebar -->
+  <div class="sidebar">
+    <div class="sidebar-header">
+      <h2>Game Profiles</h2>
+    </div>
+    <div class="profile-list" id="profileList"></div>
+    <div class="sidebar-footer">
+      <button class="btn-new-profile" onclick="newProfile()">+ New Profile</button>
+    </div>
+  </div>
+
+  <!-- Editor -->
+  <div class="editor" id="editorPanel">
+    <div class="editor-empty" id="editorEmpty">
+      <svg width="48" height="48" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.066 2.573c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.573 1.066c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.066-2.573c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.573-1.066z"/><circle cx="12" cy="12" r="3"/></svg>
+      Select a profile or create a new one
+    </div>
+
+    <div id="editorContent" style="display:none">
+
+      <!-- Basic Info -->
+      <div class="section">
+        <div class="section-head" onclick="toggleSection(this)">
+          <h3>Basic Info</h3>
+          <span class="chevron">&#9660;</span>
+        </div>
+        <div class="section-body">
+          <div class="field-row">
+            <div class="field">
+              <label>Name (slug)</label>
+              <input type="text" id="fName" placeholder="my_game" pattern="[a-z0-9_]+">
+            </div>
+            <div class="field">
+              <label>Display Name</label>
+              <input type="text" id="fDisplayName" placeholder="My Game">
+            </div>
+          </div>
+          <div class="field-row">
+            <div class="field">
+              <label>Template Directory</label>
+              <input type="text" id="fTemplateDir" placeholder="my_game">
+            </div>
+            <div class="field">
+              <label>Cooldown Override (sec)</label>
+              <input type="number" id="fCooldown" placeholder="none" min="1" max="120">
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Screenshot Canvas -->
+      <div class="section">
+        <div class="section-head" onclick="toggleSection(this)">
+          <h3>Screenshot &amp; Detection Zones</h3>
+          <span class="chevron">&#9660;</span>
+        </div>
+        <div class="section-body">
+          <div class="canvas-toolbar">
+            <button class="tool-btn" id="toolUpload" onclick="document.getElementById('canvasFileInput').click()">
+              Upload Image
+            </button>
+            <input type="file" id="canvasFileInput" accept="image/*" onchange="loadCanvasImage(this)" style="display:none">
+            <div class="tool-sep"></div>
+            <button class="tool-btn" id="toolSelect" onclick="setTool('select')">Select</button>
+            <button class="tool-btn active" id="toolRegion" onclick="setTool('region')">Draw Region</button>
+            <button class="tool-btn" id="toolColor" onclick="setTool('color')">Sample Color</button>
+            <div class="canvas-info" id="canvasInfo"></div>
+          </div>
+
+          <div class="canvas-container" id="canvasContainer">
+            <div class="canvas-placeholder" id="canvasPlaceholder" onclick="document.getElementById('canvasFileInput').click()">
+              Upload a death screen screenshot to configure detection zones
+            </div>
+            <div class="canvas-stack" id="canvasStack">
+              <canvas id="baseCanvas"></canvas>
+              <canvas id="overlayCanvas"></canvas>
+            </div>
+            <!-- Color popup -->
+            <div class="color-popup" id="colorPopup">
+              <div class="swatch-row">
+                <div class="swatch" id="popupSwatch"></div>
+                <div class="swatch-info">
+                  <div id="popupRGB"></div>
+                  <div id="popupBGR"></div>
+                </div>
+              </div>
+              <div class="tolerance-row">
+                <span>Tolerance</span>
+                <input type="range" id="popupTolerance" min="5" max="80" value="30" oninput="document.getElementById('popupTolVal').textContent=this.value">
+                <span class="val" id="popupTolVal">30</span>
+              </div>
+              <div class="popup-btns">
+                <button onclick="addSampledColor('dominant')">Add Dominant</button>
+                <button onclick="addSampledColor('fade')" class="primary">Set as Fade</button>
+                <button onclick="closeColorPopup()">Cancel</button>
+              </div>
+            </div>
+          </div>
+
+          <!-- Screen Regions -->
+          <h3 style="font-size:12px;font-weight:600;color:var(--text-dim);margin:12px 0 6px;text-transform:uppercase;letter-spacing:0.8px">Screen Regions</h3>
+          <div id="regionsList"></div>
+        </div>
+      </div>
+
+      <!-- Colors -->
+      <div class="section">
+        <div class="section-head" onclick="toggleSection(this)">
+          <h3>Color Ranges (BGR)</h3>
+          <span class="chevron">&#9660;</span>
+        </div>
+        <div class="section-body">
+          <h3 style="font-size:12px;font-weight:600;color:var(--text-dim);margin-bottom:6px;text-transform:uppercase;letter-spacing:0.8px">Dominant Colors</h3>
+          <div id="colorsList"></div>
+
+          <h3 style="font-size:12px;font-weight:600;color:var(--text-dim);margin:16px 0 6px;text-transform:uppercase;letter-spacing:0.8px">Fade-to Color</h3>
+          <div id="fadeColorDisplay"></div>
+        </div>
+      </div>
+
+      <!-- Brightness -->
+      <div class="section">
+        <div class="section-head" onclick="toggleSection(this)">
+          <h3>Brightness Thresholds</h3>
+          <span class="chevron">&#9660;</span>
+        </div>
+        <div class="section-body">
+          <div class="brightness-bar-container" id="brightnessBar">
+            <div class="brightness-marker mean" id="brightnessMean" style="display:none">
+              <div class="brightness-marker-label" style="color:var(--cyan)">mean</div>
+            </div>
+            <div class="brightness-marker max-mark" id="brightnessMaxMark" style="display:none">
+              <div class="brightness-marker-label" style="color:var(--red)">max</div>
+            </div>
+            <div class="brightness-marker min-mark" id="brightnessMinMark" style="display:none">
+              <div class="brightness-marker-label" style="color:var(--green)">min</div>
+            </div>
+          </div>
+          <div class="slider-row">
+            <input type="checkbox" id="maxBrightCheck" onchange="updateBrightnessUI()">
+            <label for="maxBrightCheck">Max Brightness</label>
+            <input type="range" id="maxBrightSlider" min="0" max="255" value="60" oninput="updateBrightnessUI()">
+            <span class="slider-val" id="maxBrightVal">60</span>
+          </div>
+          <div class="slider-row">
+            <input type="checkbox" id="minBrightCheck" onchange="updateBrightnessUI()">
+            <label for="minBrightCheck">Min Brightness</label>
+            <input type="range" id="minBrightSlider" min="0" max="255" value="200" oninput="updateBrightnessUI()">
+            <span class="slider-val" id="minBrightVal">200</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Templates -->
+      <div class="section collapsed">
+        <div class="section-head" onclick="toggleSection(this)">
+          <h3>Template Images</h3>
+          <span class="chevron">&#9660;</span>
+        </div>
+        <div class="section-body">
+          <div class="template-grid" id="templateGrid"></div>
+          <div class="template-upload-zone" onclick="document.getElementById('templateFileInput').click()">
+            <input type="file" id="templateFileInput" accept="image/*" onchange="uploadTemplate(this)">
+            Click to upload a template image
+          </div>
+        </div>
+      </div>
+
+      <!-- Test Detection -->
+      <div class="section">
+        <div class="section-head" onclick="toggleSection(this)">
+          <h3>Test Detection</h3>
+          <span class="chevron">&#9660;</span>
+        </div>
+        <div class="section-body">
+          <p style="font-size:12px;color:var(--text-muted);margin-bottom:10px">
+            Tests the current profile configuration against the uploaded screenshot.
+          </p>
+          <button class="btn btn-secondary" id="testBtn" onclick="testDetection()" disabled>
+            Run Detection Test
+          </button>
+          <div class="test-results" id="testResults">
+            <div class="test-verdict" id="testVerdict"></div>
+            <div class="test-scores" id="testScores"></div>
+            <div class="debug-tabs-row" id="debugTabsRow"></div>
+            <div class="debug-img-wrap"><img id="debugImg" src="" style="display:none"></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Actions -->
+      <div class="action-bar">
+        <button class="btn btn-accent" onclick="saveCurrentProfile()">Save Profile</button>
+        <button class="btn btn-danger" id="deleteBtn" onclick="deleteCurrentProfile()">Delete</button>
+        <div style="flex:1"></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+// ═══════════════════════════════════════════════════════════════
+// STATE
+// ═══════════════════════════════════════════════════════════════
+
+let profiles = {};
+let currentProfile = null;
+let currentTool = 'region';
+let canvasImage = null;       // Image element loaded onto canvas
+let canvasImageFile = null;   // raw File for test uploads
+let regions = [];             // [{x_min, y_min, x_max, y_max}]
+let dominantColors = [];      // [{lower:[b,g,r], upper:[b,g,r]}]
+let fadeColor = null;         // {lower:[b,g,r], upper:[b,g,r]} | null
+let sampledRGB = null;        // {r,g,b} last sampled pixel
+let isDrawing = false;
+let drawStart = null;
+let meanBrightness = null;
+let debugImageData = {};
+
+// ═══════════════════════════════════════════════════════════════
+// INIT
+// ═══════════════════════════════════════════════════════════════
+
+loadProfiles();
+
+async function loadProfiles() {
+  const res = await fetch('/api/profiles');
+  profiles = await res.json();
+  renderProfileList();
+}
+
+function renderProfileList() {
+  const list = document.getElementById('profileList');
+  list.innerHTML = '';
+  for (const name of Object.keys(profiles).sort()) {
+    const el = document.createElement('div');
+    el.className = 'profile-item' + (currentProfile === name ? ' active' : '');
+    el.innerHTML = `<div class="dot"></div>${profiles[name].display_name || name}`;
+    el.onclick = () => selectProfile(name);
+    list.appendChild(el);
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════
+// PROFILE SELECTION
+// ═══════════════════════════════════════════════════════════════
+
+function selectProfile(name) {
+  currentProfile = name;
+  const p = profiles[name];
+  renderProfileList();
+  document.getElementById('editorEmpty').style.display = 'none';
+  document.getElementById('editorContent').style.display = 'block';
+
+  document.getElementById('fName').value = p.name;
+  document.getElementById('fDisplayName').value = p.display_name;
+  document.getElementById('fTemplateDir').value = p.template_dir || '';
+  document.getElementById('fCooldown').value = p.cooldown_override || '';
+
+  regions = (p.screen_regions || []).map(r => ({...r}));
+  dominantColors = (p.dominant_colors || []).map(c => ({lower: [...c.lower], upper: [...c.upper]}));
+  fadeColor = p.fade_to_color ? {lower: [...p.fade_to_color.lower], upper: [...p.fade_to_color.upper]} : null;
+
+  // Brightness
+  const maxB = p.max_brightness;
+  const minB = p.min_brightness;
+  document.getElementById('maxBrightCheck').checked = maxB != null;
+  document.getElementById('maxBrightSlider').value = maxB != null ? maxB : 60;
+  document.getElementById('minBrightCheck').checked = minB != null;
+  document.getElementById('minBrightSlider').value = minB != null ? minB : 200;
+
+  // Reset canvas
+  canvasImage = null;
+  canvasImageFile = null;
+  meanBrightness = null;
+  document.getElementById('canvasPlaceholder').style.display = '';
+  document.getElementById('canvasStack').style.display = 'none';
+  document.getElementById('testBtn').disabled = true;
+  document.getElementById('testResults').classList.remove('show');
+  document.getElementById('deleteBtn').disabled = (name === 'generic');
+
+  renderRegions();
+  renderColors();
+  renderFadeColor();
+  updateBrightnessUI();
+  loadTemplateList();
+  redrawOverlay();
+}
+
+function newProfile() {
+  currentProfile = '__new__';
+  renderProfileList();
+  document.getElementById('editorEmpty').style.display = 'none';
+  document.getElementById('editorContent').style.display = 'block';
+
+  document.getElementById('fName').value = '';
+  document.getElementById('fDisplayName').value = '';
+  document.getElementById('fTemplateDir').value = '';
+  document.getElementById('fCooldown').value = '';
+
+  regions = [];
+  dominantColors = [];
+  fadeColor = null;
+  canvasImage = null;
+  canvasImageFile = null;
+  meanBrightness = null;
+
+  document.getElementById('maxBrightCheck').checked = false;
+  document.getElementById('maxBrightSlider').value = 60;
+  document.getElementById('minBrightCheck').checked = false;
+  document.getElementById('minBrightSlider').value = 200;
+
+  document.getElementById('canvasPlaceholder').style.display = '';
+  document.getElementById('canvasStack').style.display = 'none';
+  document.getElementById('testBtn').disabled = true;
+  document.getElementById('testResults').classList.remove('show');
+  document.getElementById('deleteBtn').disabled = true;
+  document.getElementById('templateGrid').innerHTML = '';
+
+  renderRegions();
+  renderColors();
+  renderFadeColor();
+  updateBrightnessUI();
+
+  document.getElementById('fName').focus();
+}
+
+// ═══════════════════════════════════════════════════════════════
+// CANVAS
+// ═══════════════════════════════════════════════════════════════
+
+function loadCanvasImage(input) {
+  const file = input.files[0];
+  if (!file) return;
+  canvasImageFile = file;
+  const img = new Image();
+  img.onload = function() {
+    canvasImage = img;
+    const base = document.getElementById('baseCanvas');
+    const overlay = document.getElementById('overlayCanvas');
+
+    base.width = img.naturalWidth;
+    base.height = img.naturalHeight;
+    overlay.width = img.naturalWidth;
+    overlay.height = img.naturalHeight;
+
+    const ctx = base.getContext('2d');
+    ctx.drawImage(img, 0, 0);
+
+    document.getElementById('canvasPlaceholder').style.display = 'none';
+    document.getElementById('canvasStack').style.display = 'block';
+    document.getElementById('testBtn').disabled = false;
+
+    computeMeanBrightness();
+    updateBrightnessUI();
+    redrawOverlay();
+  };
+  img.src = URL.createObjectURL(file);
+  input.value = '';
+}
+
+function computeMeanBrightness() {
+  if (!canvasImage) { meanBrightness = null; return; }
+  const c = document.createElement('canvas');
+  c.width = canvasImage.naturalWidth;
+  c.height = canvasImage.naturalHeight;
+  const ctx = c.getContext('2d');
+  ctx.drawImage(canvasImage, 0, 0);
+  const data = ctx.getImageData(0, 0, c.width, c.height).data;
+  let sum = 0;
+  const pixels = c.width * c.height;
+  for (let i = 0; i < data.length; i += 4) {
+    sum += 0.299 * data[i] + 0.587 * data[i+1] + 0.114 * data[i+2];
+  }
+  meanBrightness = sum / pixels;
+}
+
+// ── Canvas mouse events ──
+const overlay = document.getElementById('overlayCanvas');
+
+overlay.addEventListener('mousedown', function(e) {
+  const rect = overlay.getBoundingClientRect();
+  const scaleX = overlay.width / rect.width;
+  const scaleY = overlay.height / rect.height;
+  const px = (e.clientX - rect.left) * scaleX;
+  const py = (e.clientY - rect.top) * scaleY;
+  const nx = px / overlay.width;
+  const ny = py / overlay.height;
+
+  if (currentTool === 'region') {
+    isDrawing = true;
+    drawStart = {nx, ny, px, py};
+  } else if (currentTool === 'color') {
+    sampleColorAt(px, py, e.clientX, e.clientY);
+  }
+});
+
+overlay.addEventListener('mousemove', function(e) {
+  const rect = overlay.getBoundingClientRect();
+  const scaleX = overlay.width / rect.width;
+  const scaleY = overlay.height / rect.height;
+  const px = (e.clientX - rect.left) * scaleX;
+  const py = (e.clientY - rect.top) * scaleY;
+  const nx = (px / overlay.width).toFixed(3);
+  const ny = (py / overlay.height).toFixed(3);
+
+  document.getElementById('canvasInfo').textContent = `${Math.round(px)}, ${Math.round(py)} (${nx}, ${ny})`;
+
+  if (isDrawing && drawStart) {
+    redrawOverlay(px, py);
+  }
+});
+
+overlay.addEventListener('mouseup', function(e) {
+  if (!isDrawing || !drawStart) return;
+  isDrawing = false;
+
+  const rect = overlay.getBoundingClientRect();
+  const scaleX = overlay.width / rect.width;
+  const scaleY = overlay.height / rect.height;
+  const px = (e.clientX - rect.left) * scaleX;
+  const py = (e.clientY - rect.top) * scaleY;
+  const nx = px / overlay.width;
+  const ny = py / overlay.height;
+
+  const x_min = Math.min(drawStart.nx, nx);
+  const y_min = Math.min(drawStart.ny, ny);
+  const x_max = Math.max(drawStart.nx, nx);
+  const y_max = Math.max(drawStart.ny, ny);
+
+  if (Math.abs(x_max - x_min) > 0.01 && Math.abs(y_max - y_min) > 0.01) {
+    regions.push({
+      x_min: +x_min.toFixed(4),
+      y_min: +y_min.toFixed(4),
+      x_max: +x_max.toFixed(4),
+      y_max: +y_max.toFixed(4),
+    });
+    renderRegions();
+  }
+
+  drawStart = null;
+  redrawOverlay();
+});
+
+overlay.addEventListener('mouseleave', function() {
+  if (isDrawing) {
+    isDrawing = false;
+    drawStart = null;
+    redrawOverlay();
+  }
+});
+
+function redrawOverlay(dragPx, dragPy) {
+  const ctx = overlay.getContext('2d');
+  ctx.clearRect(0, 0, overlay.width, overlay.height);
+
+  // Draw existing regions
+  ctx.strokeStyle = 'rgba(187, 102, 255, 0.8)';
+  ctx.lineWidth = 2;
+  ctx.setLineDash([6, 4]);
+
+  for (const r of regions) {
+    const x = r.x_min * overlay.width;
+    const y = r.y_min * overlay.height;
+    const w = (r.x_max - r.x_min) * overlay.width;
+    const h = (r.y_max - r.y_min) * overlay.height;
+    ctx.fillStyle = 'rgba(187, 102, 255, 0.08)';
+    ctx.fillRect(x, y, w, h);
+    ctx.strokeRect(x, y, w, h);
+  }
+
+  // Draw active drag
+  if (isDrawing && drawStart && dragPx !== undefined) {
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.9)';
+    ctx.setLineDash([4, 3]);
+    ctx.lineWidth = 1.5;
+    const x = Math.min(drawStart.px, dragPx);
+    const y = Math.min(drawStart.py, dragPy);
+    const w = Math.abs(dragPx - drawStart.px);
+    const h = Math.abs(dragPy - drawStart.py);
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.05)';
+    ctx.fillRect(x, y, w, h);
+    ctx.strokeRect(x, y, w, h);
+  }
+
+  ctx.setLineDash([]);
+}
+
+// ── Color sampling ──
+function sampleColorAt(px, py, clientX, clientY) {
+  const base = document.getElementById('baseCanvas');
+  const ctx = base.getContext('2d');
+  const pixel = ctx.getImageData(Math.round(px), Math.round(py), 1, 1).data;
+  const r = pixel[0], g = pixel[1], b = pixel[2];
+  sampledRGB = {r, g, b};
+
+  const popup = document.getElementById('colorPopup');
+  document.getElementById('popupSwatch').style.background = `rgb(${r},${g},${b})`;
+  document.getElementById('popupRGB').textContent = `RGB: ${r}, ${g}, ${b}`;
+  document.getElementById('popupBGR').textContent = `BGR: ${b}, ${g}, ${r}`;
+  document.getElementById('popupTolerance').value = 30;
+  document.getElementById('popupTolVal').textContent = '30';
+
+  // Position popup near click
+  const container = document.getElementById('canvasContainer');
+  const cRect = container.getBoundingClientRect();
+  let left = clientX - cRect.left + 12;
+  let top = clientY - cRect.top + 12;
+  if (left + 230 > cRect.width) left = clientX - cRect.left - 240;
+  if (top + 180 > cRect.height) top = clientY - cRect.top - 190;
+  popup.style.left = Math.max(4, left) + 'px';
+  popup.style.top = Math.max(4, top) + 'px';
+  popup.classList.add('show');
+}
+
+function closeColorPopup() {
+  document.getElementById('colorPopup').classList.remove('show');
+}
+
+function addSampledColor(type) {
+  if (!sampledRGB) return;
+  const tol = parseInt(document.getElementById('popupTolerance').value);
+  const {r, g, b} = sampledRGB;
+  // BGR for profiles
+  const lower = [Math.max(0, b - tol), Math.max(0, g - tol), Math.max(0, r - tol)];
+  const upper = [Math.min(255, b + tol), Math.min(255, g + tol), Math.min(255, r + tol)];
+
+  if (type === 'dominant') {
+    dominantColors.push({lower, upper});
+    renderColors();
+  } else {
+    fadeColor = {lower, upper};
+    renderFadeColor();
+  }
+  closeColorPopup();
+}
+
+// ── Tool switching ──
+function setTool(tool) {
+  currentTool = tool;
+  document.querySelectorAll('.tool-btn').forEach(b => b.classList.remove('active'));
+  const btn = document.getElementById('tool' + tool.charAt(0).toUpperCase() + tool.slice(1));
+  if (btn) btn.classList.add('active');
+  overlay.style.cursor = tool === 'color' ? 'crosshair' : tool === 'region' ? 'crosshair' : 'default';
+}
+
+// ═══════════════════════════════════════════════════════════════
+// RENDER LISTS
+// ═══════════════════════════════════════════════════════════════
+
+function renderRegions() {
+  const el = document.getElementById('regionsList');
+  if (regions.length === 0) {
+    el.innerHTML = '<div class="empty-list">No regions defined. Use Draw Region tool on the canvas.</div>';
+    return;
+  }
+  el.innerHTML = regions.map((r, i) =>
+    `<div class="list-item">
+      <span style="color:var(--region-color);font-size:14px">&#9633;</span>
+      <span>(${r.x_min.toFixed(2)}, ${r.y_min.toFixed(2)}) &rarr; (${r.x_max.toFixed(2)}, ${r.y_max.toFixed(2)})</span>
+      <button class="remove-btn" onclick="removeRegion(${i})">&times;</button>
+    </div>`
+  ).join('');
+}
+
+function removeRegion(i) {
+  regions.splice(i, 1);
+  renderRegions();
+  redrawOverlay();
+}
+
+function renderColors() {
+  const el = document.getElementById('colorsList');
+  if (dominantColors.length === 0) {
+    el.innerHTML = '<div class="empty-list">No colors defined. Use Sample Color tool on the canvas.</div>';
+    return;
+  }
+  el.innerHTML = dominantColors.map((c, i) => {
+    // Show midpoint color (BGR to RGB for display)
+    const mr = Math.round((c.lower[2] + c.upper[2]) / 2);
+    const mg = Math.round((c.lower[1] + c.upper[1]) / 2);
+    const mb = Math.round((c.lower[0] + c.upper[0]) / 2);
+    return `<div class="list-item">
+      <div class="color-swatch" style="background:rgb(${mr},${mg},${mb})"></div>
+      <span>L:[${c.lower.join(',')}] U:[${c.upper.join(',')}]</span>
+      <button class="remove-btn" onclick="removeColor(${i})">&times;</button>
+    </div>`;
+  }).join('');
+}
+
+function removeColor(i) {
+  dominantColors.splice(i, 1);
+  renderColors();
+}
+
+function renderFadeColor() {
+  const el = document.getElementById('fadeColorDisplay');
+  if (!fadeColor) {
+    el.innerHTML = '<div class="empty-list">No fade color set. Use Sample Color tool and click "Set as Fade".</div>';
+    return;
+  }
+  const c = fadeColor;
+  const mr = Math.round((c.lower[2] + c.upper[2]) / 2);
+  const mg = Math.round((c.lower[1] + c.upper[1]) / 2);
+  const mb = Math.round((c.lower[0] + c.upper[0]) / 2);
+  el.innerHTML = `<div class="fade-color-display">
+    <div class="color-swatch" style="background:rgb(${mr},${mg},${mb})"></div>
+    <span>L:[${c.lower.join(',')}] U:[${c.upper.join(',')}]</span>
+    <button class="remove-btn" onclick="clearFadeColor()">&times;</button>
+  </div>`;
+}
+
+function clearFadeColor() {
+  fadeColor = null;
+  renderFadeColor();
+}
+
+// ═══════════════════════════════════════════════════════════════
+// BRIGHTNESS
+// ═══════════════════════════════════════════════════════════════
+
+function updateBrightnessUI() {
+  const maxOn = document.getElementById('maxBrightCheck').checked;
+  const minOn = document.getElementById('minBrightCheck').checked;
+  const maxVal = parseInt(document.getElementById('maxBrightSlider').value);
+  const minVal = parseInt(document.getElementById('minBrightSlider').value);
+  document.getElementById('maxBrightVal').textContent = maxOn ? maxVal : '--';
+  document.getElementById('minBrightVal').textContent = minOn ? minVal : '--';
+  document.getElementById('maxBrightSlider').disabled = !maxOn;
+  document.getElementById('minBrightSlider').disabled = !minOn;
+
+  // Update markers
+  const meanMark = document.getElementById('brightnessMean');
+  const maxMark = document.getElementById('brightnessMaxMark');
+  const minMark = document.getElementById('brightnessMinMark');
+
+  if (meanBrightness != null) {
+    meanMark.style.display = '';
+    meanMark.style.left = (meanBrightness / 255 * 100) + '%';
+    meanMark.querySelector('.brightness-marker-label').textContent = 'mean: ' + Math.round(meanBrightness);
+  } else {
+    meanMark.style.display = 'none';
+  }
+
+  if (maxOn) {
+    maxMark.style.display = '';
+    maxMark.style.left = (maxVal / 255 * 100) + '%';
+    maxMark.querySelector('.brightness-marker-label').textContent = 'max: ' + maxVal;
+  } else {
+    maxMark.style.display = 'none';
+  }
+
+  if (minOn) {
+    minMark.style.display = '';
+    minMark.style.left = (minVal / 255 * 100) + '%';
+    minMark.querySelector('.brightness-marker-label').textContent = 'min: ' + minVal;
+  } else {
+    minMark.style.display = 'none';
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════
+// TEMPLATES
+// ═══════════════════════════════════════════════════════════════
+
+async function loadTemplateList() {
+  const name = document.getElementById('fName').value.trim();
+  const grid = document.getElementById('templateGrid');
+  if (!name || !profiles[name]) { grid.innerHTML = ''; return; }
+
+  const res = await fetch(`/api/profiles/${encodeURIComponent(name)}/templates`);
+  const data = await res.json();
+  const files = data.files || [];
+  grid.innerHTML = files.map(f =>
+    `<img class="template-thumb" src="/api/profiles/${encodeURIComponent(name)}/templates/${encodeURIComponent(f)}" alt="${f}" title="${f}">`
+  ).join('') || '<span class="empty-list">No template images yet.</span>';
+}
+
+async function uploadTemplate(input) {
+  const file = input.files[0];
+  if (!file) return;
+  const name = document.getElementById('fName').value.trim();
+  if (!name) { showToast('Save the profile first', 'error'); return; }
+
+  const form = new FormData();
+  form.append('image', file);
+  const res = await fetch(`/api/profiles/${encodeURIComponent(name)}/templates`, {method: 'POST', body: form});
+  if (res.ok) {
+    showToast('Template uploaded', 'success');
+    loadTemplateList();
+  } else {
+    showToast('Upload failed', 'error');
+  }
+  input.value = '';
+}
+
+// ═══════════════════════════════════════════════════════════════
+// SAVE / DELETE
+// ═══════════════════════════════════════════════════════════════
+
+function buildProfileData() {
+  const maxOn = document.getElementById('maxBrightCheck').checked;
+  const minOn = document.getElementById('minBrightCheck').checked;
+  const cooldown = document.getElementById('fCooldown').value;
+  return {
+    name: document.getElementById('fName').value.trim(),
+    display_name: document.getElementById('fDisplayName').value.trim(),
+    template_dir: document.getElementById('fTemplateDir').value.trim(),
+    screen_regions: regions,
+    dominant_colors: dominantColors,
+    fade_to_color: fadeColor,
+    max_brightness: maxOn ? parseInt(document.getElementById('maxBrightSlider').value) : null,
+    min_brightness: minOn ? parseInt(document.getElementById('minBrightSlider').value) : null,
+    cooldown_override: cooldown ? parseInt(cooldown) : null,
+  };
+}
+
+async function saveCurrentProfile() {
+  const data = buildProfileData();
+  if (!data.name) { showToast('Profile name is required', 'error'); return; }
+  if (!/^[a-z0-9_]+$/.test(data.name)) { showToast('Name must be lowercase alphanumeric with underscores', 'error'); return; }
+
+  const res = await fetch('/api/profiles', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify(data),
+  });
+
+  if (res.ok) {
+    showToast('Profile saved', 'success');
+    await loadProfiles();
+    currentProfile = data.name;
+    renderProfileList();
+  } else {
+    const err = await res.json();
+    showToast(err.error || 'Save failed', 'error');
+  }
+}
+
+async function deleteCurrentProfile() {
+  if (!currentProfile || currentProfile === '__new__') return;
+  if (!confirm(`Delete profile "${currentProfile}"?`)) return;
+
+  const res = await fetch(`/api/profiles/${encodeURIComponent(currentProfile)}`, {method: 'DELETE'});
+  if (res.ok) {
+    showToast('Profile deleted', 'success');
+    currentProfile = null;
+    await loadProfiles();
+    document.getElementById('editorContent').style.display = 'none';
+    document.getElementById('editorEmpty').style.display = '';
+  } else {
+    const err = await res.json();
+    showToast(err.error || 'Delete failed', 'error');
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════
+// TEST DETECTION
+// ═══════════════════════════════════════════════════════════════
+
+const DEBUG_TAB_ORDER = [
+  {key: 'original', label: 'Original'},
+  {key: 'template_match', label: 'Template'},
+  {key: 'edge_detection', label: 'Edges'},
+  {key: 'color_mask', label: 'Color'},
+  {key: 'brightness', label: 'Brightness'},
+  {key: 'fade_mask', label: 'Fade'},
+];
+
+async function testDetection() {
+  if (!canvasImageFile) { showToast('Upload an image first', 'error'); return; }
+
+  const name = document.getElementById('fName').value.trim() || 'generic';
+  const profileData = buildProfileData();
+  const form = new FormData();
+  form.append('image', canvasImageFile);
+  form.append('profile_data', JSON.stringify(profileData));
+
+  document.getElementById('testBtn').disabled = true;
+  document.getElementById('testBtn').textContent = 'Testing...';
+
+  try {
+    const res = await fetch(`/api/profiles/${encodeURIComponent(name)}/test`, {method: 'POST', body: form});
+    const data = await res.json();
+    if (!res.ok) { showToast(data.error || 'Test failed', 'error'); return; }
+
+    const resultsEl = document.getElementById('testResults');
+    resultsEl.classList.add('show');
+
+    // Verdict
+    const verdictEl = document.getElementById('testVerdict');
+    if (data.is_death) {
+      verdictEl.className = 'test-verdict death';
+      verdictEl.textContent = `DEATH DETECTED \u2014 confidence: ${data.confidence}`;
+    } else {
+      verdictEl.className = 'test-verdict no-death';
+      verdictEl.textContent = `No death detected \u2014 confidence: ${data.confidence}`;
+    }
+
+    // Scores
+    const scoresEl = document.getElementById('testScores');
+    const s = data.scores || {};
+    scoresEl.innerHTML = Object.entries(s).map(([k, v]) =>
+      `<div class="test-score"><span class="name">${k}</span><span class="val">${v.toFixed(4)}</span></div>`
+    ).join('');
+
+    // Debug images
+    debugImageData = data.debug_images || {};
+    const tabsRow = document.getElementById('debugTabsRow');
+    tabsRow.innerHTML = '';
+    let firstKey = null;
+    for (const {key, label} of DEBUG_TAB_ORDER) {
+      if (!(key in debugImageData)) continue;
+      if (!firstKey) firstKey = key;
+      const btn = document.createElement('button');
+      btn.className = 'debug-tab-btn';
+      btn.textContent = label;
+      btn.dataset.key = key;
+      btn.onclick = () => showDebugImg(key);
+      tabsRow.appendChild(btn);
+    }
+    if (firstKey) showDebugImg(firstKey);
+  } finally {
+    document.getElementById('testBtn').disabled = false;
+    document.getElementById('testBtn').textContent = 'Run Detection Test';
+  }
+}
+
+function showDebugImg(key) {
+  document.getElementById('debugImg').src = 'data:image/jpeg;base64,' + debugImageData[key];
+  document.getElementById('debugImg').style.display = 'block';
+  document.querySelectorAll('.debug-tab-btn').forEach(b => b.classList.toggle('active', b.dataset.key === key));
+}
+
+// ═══════════════════════════════════════════════════════════════
+// UI HELPERS
+// ═══════════════════════════════════════════════════════════════
+
+function toggleSection(headEl) {
+  headEl.closest('.section').classList.toggle('collapsed');
+}
+
+function showToast(msg, type) {
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.className = 'toast ' + type + ' show';
+  clearTimeout(t._timer);
+  t._timer = setTimeout(() => t.classList.remove('show'), 2500);
+}
+</script>
+
+</body>
+</html>

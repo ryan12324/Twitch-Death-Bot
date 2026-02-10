@@ -21,7 +21,7 @@ from pathlib import Path
 
 import cv2
 import numpy as np
-from flask import Flask, Response, jsonify, render_template, request
+from flask import Flask, Response, jsonify, render_template, request, send_from_directory
 from dotenv import load_dotenv
 
 # Ensure project root is on the path
@@ -30,7 +30,13 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from detection.counter import DeathCounter
 from detection.detector import DeathDetector
 from detection.stream_capture import StreamCapture
-from game_profiles.profiles import PROFILES, get_profile, list_profiles
+from game_profiles.profiles import (
+    PROFILES, get_profile, list_profiles,
+    profile_to_dict, save_profile, delete_profile, _parse_profile,
+)
+
+PROJECT_ROOT = Path(__file__).parent.parent
+TEMPLATES_DIR = PROJECT_ROOT / "game_profiles" / "templates"
 
 load_dotenv()
 
@@ -373,8 +379,14 @@ def api_analyze_image():
     detector = DeathDetector(
         profile=profile, threshold=threshold, cooldown=0, required_consecutive=1,
     )
-    is_death, confidence = detector.analyze_frame(frame)
+    is_death, confidence, debug_images = detector.analyze_frame_debug(frame)
     scores = _get_scores(detector)
+
+    # Encode debug images as base64 JPEGs
+    debug_b64 = {}
+    for name, img in debug_images.items():
+        jpg_bytes = _encode_frame_jpg(img, quality=85)
+        debug_b64[name] = base64.b64encode(jpg_bytes).decode("ascii")
 
     logger.info(
         "analyze_image: RESULT is_death=%s confidence=%.4f templates_loaded=%d scores=%s",
@@ -386,6 +398,7 @@ def api_analyze_image():
         "confidence": round(confidence, 4),
         "scores": scores,
         "templates_loaded": len(detector.templates),
+        "debug_images": debug_b64,
     })
 
 
@@ -407,6 +420,146 @@ def video_feed():
         generate(),
         mimetype="multipart/x-mixed-replace; boundary=frame",
     )
+
+
+# ---------------------------------------------------------------------------
+# Profile CRUD routes
+# ---------------------------------------------------------------------------
+
+
+@app.route("/profiles")
+def profiles_page():
+    return render_template("profiles.html", profiles=list_profiles())
+
+
+@app.route("/api/profiles")
+def api_profiles_list():
+    """List all profiles as JSON."""
+    return jsonify({
+        name: profile_to_dict(p) for name, p in PROFILES.items()
+    })
+
+
+@app.route("/api/profiles/<name>")
+def api_profile_get(name):
+    """Get a single profile as JSON."""
+    if name not in PROFILES:
+        return jsonify({"error": f"Unknown profile: {name}"}), 404
+    return jsonify(profile_to_dict(PROFILES[name]))
+
+
+@app.route("/api/profiles", methods=["POST"])
+def api_profile_save():
+    """Create or update a profile."""
+    data = request.get_json()
+    if not data:
+        return jsonify({"error": "No JSON body"}), 400
+    try:
+        profile = save_profile(data)
+        return jsonify(profile_to_dict(profile))
+    except (ValueError, KeyError) as e:
+        return jsonify({"error": str(e)}), 400
+
+
+@app.route("/api/profiles/<name>", methods=["DELETE"])
+def api_profile_delete(name):
+    """Delete a profile."""
+    try:
+        delete_profile(name)
+        return jsonify({"status": "deleted"})
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400
+    except FileNotFoundError as e:
+        return jsonify({"error": str(e)}), 404
+
+
+@app.route("/api/profiles/<name>/templates")
+def api_profile_templates(name):
+    """List template image filenames for a profile."""
+    if name not in PROFILES:
+        return jsonify({"error": f"Unknown profile: {name}"}), 404
+    tdir = TEMPLATES_DIR / PROFILES[name].template_dir
+    if not tdir.is_dir():
+        return jsonify({"files": []})
+    files = sorted(
+        f.name for f in tdir.iterdir()
+        if f.suffix.lower() in (".png", ".jpg", ".jpeg", ".bmp")
+    )
+    return jsonify({"files": files})
+
+
+@app.route("/api/profiles/<name>/templates", methods=["POST"])
+def api_profile_template_upload(name):
+    """Upload a template image for a profile."""
+    if name not in PROFILES:
+        return jsonify({"error": f"Unknown profile: {name}"}), 404
+    if "image" not in request.files:
+        return jsonify({"error": "No image uploaded"}), 400
+
+    profile = PROFILES[name]
+    tdir = TEMPLATES_DIR / profile.template_dir
+    tdir.mkdir(parents=True, exist_ok=True)
+
+    file = request.files["image"]
+    filename = Path(file.filename).name  # sanitize
+    dest = tdir / filename
+    file.save(str(dest))
+    return jsonify({"status": "uploaded", "filename": filename})
+
+
+@app.route("/api/profiles/<name>/templates/<filename>")
+def api_profile_template_file(name, filename):
+    """Serve a template image file."""
+    if name not in PROFILES:
+        return jsonify({"error": f"Unknown profile: {name}"}), 404
+    tdir = TEMPLATES_DIR / PROFILES[name].template_dir
+    return send_from_directory(str(tdir), filename)
+
+
+@app.route("/api/profiles/<name>/test", methods=["POST"])
+def api_profile_test(name):
+    """Test a profile against an uploaded image."""
+    if "image" not in request.files:
+        return jsonify({"error": "No image uploaded"}), 400
+
+    file = request.files["image"]
+    img_bytes = file.read()
+    nparr = np.frombuffer(img_bytes, np.uint8)
+    frame = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+    if frame is None:
+        return jsonify({"error": "Could not decode image"}), 400
+
+    # Allow testing with unsaved profile data
+    profile_data_str = request.form.get("profile_data")
+    if profile_data_str:
+        try:
+            data = json.loads(profile_data_str)
+            profile = _parse_profile(data)
+        except Exception as e:
+            return jsonify({"error": f"Invalid profile data: {e}"}), 400
+    else:
+        if name not in PROFILES:
+            return jsonify({"error": f"Unknown profile: {name}"}), 404
+        profile = PROFILES[name]
+
+    detector = DeathDetector(
+        profile=profile, threshold=0.80, cooldown=0, required_consecutive=1,
+    )
+    is_death, confidence, debug_images = detector.analyze_frame_debug(frame)
+    scores = _get_scores(detector)
+
+    debug_b64 = {}
+    for img_name, img in debug_images.items():
+        jpg_bytes = _encode_frame_jpg(img, quality=85)
+        debug_b64[img_name] = base64.b64encode(jpg_bytes).decode("ascii")
+
+    return jsonify({
+        "is_death": is_death,
+        "confidence": round(confidence, 4),
+        "scores": scores,
+        "templates_loaded": len(detector.templates),
+        "debug_images": debug_b64,
+    })
 
 
 # ---------------------------------------------------------------------------

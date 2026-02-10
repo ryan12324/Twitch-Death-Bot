@@ -1,0 +1,42 @@
+{
+  "name": "hollow_knight",
+  "display_name": "Hollow Knight",
+  "template_dir": "hollow_knight",
+  "screen_regions": [
+    {
+      "x_min": 0.1,
+      "y_min": 0.1,
+      "x_max": 0.9,
+      "y_max": 0.9
+    }
+  ],
+  "dominant_colors": [
+    {
+      "lower": [
+        0,
+        0,
+        0
+      ],
+      "upper": [
+        30,
+        30,
+        30
+      ]
+    }
+  ],
+  "fade_to_color": {
+    "lower": [
+      0,
+      0,
+      0
+    ],
+    "upper": [
+      25,
+      25,
+      25
+    ]
+  },
+  "max_brightness": 35,
+  "min_brightness": null,
+  "cooldown_override": 10
+}

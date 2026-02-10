@@ -1,0 +1,31 @@
+{
+  "name": "celeste",
+  "display_name": "Celeste",
+  "template_dir": "celeste",
+  "screen_regions": [
+    {
+      "x_min": 0.0,
+      "y_min": 0.0,
+      "x_max": 1.0,
+      "y_max": 1.0
+    }
+  ],
+  "dominant_colors": [
+    {
+      "lower": [
+        200,
+        200,
+        200
+      ],
+      "upper": [
+        255,
+        255,
+        255
+      ]
+    }
+  ],
+  "fade_to_color": null,
+  "max_brightness": null,
+  "min_brightness": 200,
+  "cooldown_override": 3
+}

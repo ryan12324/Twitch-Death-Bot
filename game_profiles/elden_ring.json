@@ -1,0 +1,54 @@
+{
+  "name": "elden_ring",
+  "display_name": "Elden Ring",
+  "template_dir": "elden_ring",
+  "screen_regions": [
+    {
+      "x_min": 0.25,
+      "y_min": 0.35,
+      "x_max": 0.75,
+      "y_max": 0.65
+    }
+  ],
+  "dominant_colors": [
+    {
+      "lower": [
+        0,
+        0,
+        100
+      ],
+      "upper": [
+        80,
+        80,
+        255
+      ]
+    },
+    {
+      "lower": [
+        0,
+        0,
+        0
+      ],
+      "upper": [
+        50,
+        50,
+        50
+      ]
+    }
+  ],
+  "fade_to_color": {
+    "lower": [
+      0,
+      0,
+      0
+    ],
+    "upper": [
+      40,
+      40,
+      40
+    ]
+  },
+  "max_brightness": 60,
+  "min_brightness": null,
+  "cooldown_override": null
+}

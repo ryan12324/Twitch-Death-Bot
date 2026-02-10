@@ -495,3 +495,244 @@ class DeathDetector:
             )
 
         return is_death, confidence
+
+    # ------------------------------------------------------------------
+    # Debug visualizations (called only from image-upload endpoint)
+    # ------------------------------------------------------------------
+
+    def analyze_frame_debug(
+        self, frame: np.ndarray
+    ) -> tuple[bool, float, dict[str, np.ndarray]]:
+        """Run detection and generate debug visualization images.
+
+        Returns (is_death, confidence, debug_images) where debug_images maps
+        tab names to BGR images suitable for JPEG encoding.
+        """
+        # Normalize once; analyze_frame will see it's already within bounds
+        # and skip the redundant resize.
+        frame = self._normalize_frame(frame)
+
+        is_death, confidence = self.analyze_frame(frame)
+
+        debug_images: dict[str, np.ndarray] = {}
+        debug_images["original"] = frame.copy()
+
+        tmpl_img, edge_img = self._debug_template_match(frame)
+        debug_images["template_match"] = tmpl_img
+        debug_images["edge_detection"] = edge_img
+
+        debug_images["color_mask"] = self._debug_color_mask(frame)
+        debug_images["brightness"] = self._debug_brightness(frame)
+
+        fade_img = self._debug_fade_mask(frame)
+        if fade_img is not None:
+            debug_images["fade_mask"] = fade_img
+
+        return is_death, confidence, debug_images
+
+    def _debug_template_match(
+        self, frame: np.ndarray
+    ) -> tuple[np.ndarray, np.ndarray]:
+        """Visualize template matching: best match box + edge view."""
+        vis = frame.copy()
+        h, w = frame.shape[:2]
+
+        frame_gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+        frame_edges = cv2.Canny(frame_gray, 50, 150)
+
+        if not self.templates:
+            cv2.putText(
+                vis, "No templates loaded", (w // 2 - 140, h // 2),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 200, 200), 2,
+            )
+            edge_bgr = cv2.cvtColor(frame_edges, cv2.COLOR_GRAY2BGR)
+            return vis, edge_bgr
+
+        # Draw search regions
+        if self.profile.screen_regions:
+            for region in self.profile.screen_regions:
+                x1 = int(region.x_min * w)
+                y1 = int(region.y_min * h)
+                x2 = int(region.x_max * w)
+                y2 = int(region.y_max * h)
+                cv2.rectangle(vis, (x1, y1), (x2, y2), (200, 200, 0), 2)
+
+        # Find best match across all templates and scales
+        best_score = 0.0
+        best_loc = (0, 0)
+        best_size = (0, 0)
+        best_heatmap = None
+
+        for template in self.templates:
+            tmpl_h, tmpl_w = template.shape[:2]
+            scales = self._compute_scales(tmpl_w, tmpl_h, w, h)
+
+            for scale in scales:
+                new_w = int(tmpl_w * scale)
+                new_h = int(tmpl_h * scale)
+                if new_w >= w or new_h >= h or new_w < 10 or new_h < 10:
+                    continue
+
+                scaled = cv2.resize(template, (new_w, new_h))
+
+                # Determine search area
+                search_gray = frame_gray
+                offset_x, offset_y = 0, 0
+                if self.profile.screen_regions:
+                    for region in self.profile.screen_regions:
+                        area = self._extract_region(frame_gray, region)
+                        if area.shape[0] > new_h and area.shape[1] > new_w:
+                            search_gray = area
+                            offset_x = int(region.x_min * w)
+                            offset_y = int(region.y_min * h)
+                            break
+
+                result = cv2.matchTemplate(
+                    search_gray, scaled, cv2.TM_CCOEFF_NORMED
+                )
+                _, max_val, _, max_loc = cv2.minMaxLoc(result)
+
+                if max_val > best_score:
+                    best_score = max_val
+                    best_loc = (max_loc[0] + offset_x, max_loc[1] + offset_y)
+                    best_size = (new_w, new_h)
+                    best_heatmap = result
+
+        # Draw best match rectangle
+        if best_size[0] > 0:
+            color = (0, 255, 0) if best_score > 0.75 else (0, 165, 255)
+            pt1 = best_loc
+            pt2 = (best_loc[0] + best_size[0], best_loc[1] + best_size[1])
+            cv2.rectangle(vis, pt1, pt2, color, 3)
+            label = f"Match: {best_score:.3f}"
+            cv2.putText(
+                vis, label, (pt1[0], pt1[1] - 8),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.6, color, 2,
+            )
+
+        # Heatmap thumbnail in top-right corner
+        if best_heatmap is not None:
+            hm_norm = cv2.normalize(
+                best_heatmap, None, 0, 255, cv2.NORM_MINMAX
+            ).astype(np.uint8)
+            hm_color = cv2.applyColorMap(hm_norm, cv2.COLORMAP_JET)
+            thumb_w, thumb_h = 160, 90
+            hm_thumb = cv2.resize(hm_color, (thumb_w, thumb_h))
+            vis[8 : 8 + thumb_h, w - thumb_w - 8 : w - 8] = hm_thumb
+
+        edge_bgr = cv2.cvtColor(frame_edges, cv2.COLOR_GRAY2BGR)
+        return vis, edge_bgr
+
+    def _debug_color_mask(self, frame: np.ndarray) -> np.ndarray:
+        """Visualize dominant color mask overlay."""
+        h, w = frame.shape[:2]
+
+        if not self.profile.dominant_colors:
+            vis = frame.copy()
+            cv2.putText(
+                vis, "No dominant_colors in profile", (w // 2 - 180, h // 2),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 200, 200), 2,
+            )
+            return vis
+
+        # Build combined mask from all color ranges
+        combined_mask = np.zeros((h, w), dtype=np.uint8)
+        for color_range in self.profile.dominant_colors:
+            lower = np.array(color_range.lower, dtype=np.uint8)
+            upper = np.array(color_range.upper, dtype=np.uint8)
+            mask = cv2.inRange(frame, lower, upper)
+            combined_mask = cv2.bitwise_or(combined_mask, mask)
+
+        # Dimmed base at 30%
+        vis = (frame * 0.3).astype(np.uint8)
+        # Highlight matching pixels in green
+        green_tint = np.zeros_like(frame)
+        green_tint[:, :, 1] = 180  # green channel
+        mask_3ch = cv2.merge([combined_mask, combined_mask, combined_mask])
+        vis = np.where(mask_3ch > 0, cv2.addWeighted(frame, 0.6, green_tint, 0.4, 0), vis)
+
+        # Show match percentage
+        total_pixels = h * w
+        match_pct = np.count_nonzero(combined_mask) / total_pixels * 100
+        cv2.putText(
+            vis, f"Color match: {match_pct:.1f}%", (10, 30),
+            cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 0), 2,
+        )
+        return vis
+
+    def _debug_brightness(self, frame: np.ndarray) -> np.ndarray:
+        """Visualize brightness with threshold lines."""
+        gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+        vis = cv2.cvtColor(gray, cv2.COLOR_GRAY2BGR)
+        h, w = vis.shape[:2]
+
+        mean_val = np.mean(gray)
+
+        # Mean brightness line (green)
+        mean_y = int((1.0 - mean_val / 255.0) * h)
+        cv2.line(vis, (0, mean_y), (w, mean_y), (0, 255, 0), 2)
+        cv2.putText(
+            vis, f"Mean: {mean_val:.0f}", (10, mean_y - 8),
+            cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2,
+        )
+
+        # max_brightness threshold (yellow)
+        if self.profile.max_brightness is not None:
+            thr_y = int((1.0 - self.profile.max_brightness / 255.0) * h)
+            cv2.line(vis, (0, thr_y), (w, thr_y), (0, 255, 255), 2)
+            cv2.putText(
+                vis, f"max_brightness: {self.profile.max_brightness}",
+                (10, thr_y - 8),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 255), 2,
+            )
+
+        # min_brightness threshold (orange)
+        if self.profile.min_brightness is not None:
+            thr_y = int((1.0 - self.profile.min_brightness / 255.0) * h)
+            cv2.line(vis, (0, thr_y), (w, thr_y), (0, 165, 255), 2)
+            cv2.putText(
+                vis, f"min_brightness: {self.profile.min_brightness}",
+                (10, thr_y + 20),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 165, 255), 2,
+            )
+
+        return vis
+
+    def _debug_fade_mask(self, frame: np.ndarray) -> np.ndarray | None:
+        """Visualize fade-to-color mask. Returns None if profile has no fade_to_color."""
+        if self.profile.fade_to_color is None:
+            return None
+
+        h, w = frame.shape[:2]
+        lower = np.array(self.profile.fade_to_color.lower, dtype=np.uint8)
+        upper = np.array(self.profile.fade_to_color.upper, dtype=np.uint8)
+        mask = cv2.inRange(frame, lower, upper)
+
+        total_pixels = h * w
+        fade_ratio = np.count_nonzero(mask) / total_pixels
+
+        # Dimmed base at 30%
+        vis = (frame * 0.3).astype(np.uint8)
+        # Purple tint for matching pixels
+        purple_tint = np.zeros_like(frame)
+        purple_tint[:, :, 0] = 180  # blue
+        purple_tint[:, :, 2] = 140  # red
+        mask_3ch = cv2.merge([mask, mask, mask])
+        vis = np.where(mask_3ch > 0, cv2.addWeighted(frame, 0.5, purple_tint, 0.5, 0), vis)
+
+        # Show fade ratio and threshold status
+        pct = fade_ratio * 100
+        exceeds = fade_ratio > 0.85
+        label = f"Fade: {pct:.1f}%"
+        if exceeds:
+            label += " (STRONG FADE)"
+        color = (0, 0, 255) if exceeds else (180, 100, 220)
+        cv2.putText(
+            vis, label, (10, 30),
+            cv2.FONT_HERSHEY_SIMPLEX, 0.8, color, 2,
+        )
+        cv2.putText(
+            vis, "Threshold: 85%", (10, 60),
+            cv2.FONT_HERSHEY_SIMPLEX, 0.6, (180, 100, 220), 1,
+        )
+        return vis

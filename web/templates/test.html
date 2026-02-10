@@ -356,6 +356,47 @@
     text-align: right;
     padding: 4px 0;
   }
+
+  /* Debug gallery */
+  .debug-gallery {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+  }
+  .debug-tabs {
+    display: flex;
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+    overflow-x: auto;
+    flex-shrink: 0;
+  }
+  .debug-tab {
+    padding: 8px 16px;
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--text-dim);
+    cursor: pointer;
+    border: none;
+    background: none;
+    border-bottom: 2px solid transparent;
+    white-space: nowrap;
+    transition: all 0.15s;
+  }
+  .debug-tab:hover { color: var(--text); }
+  .debug-tab.active { color: var(--accent); border-bottom-color: var(--accent); }
+  .debug-image-container {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    overflow: hidden;
+    background: #000;
+  }
+  .debug-image-container img {
+    max-width: 100%;
+    max-height: 100%;
+    object-fit: contain;
+  }
 </style>
 </head>
 <body>
@@ -364,6 +405,7 @@
   <a href="/" class="logo"><span>Death</span>Detector</a>
   <a href="/" class="nav-link">Home</a>
   <a href="/test" class="nav-link active">Test</a>
+  <a href="/profiles" class="nav-link">Profiles</a>
   <span class="status-badge offline" id="statusBadge">Offline</span>
   <span class="frame-counter" id="templateCount" style="margin-left:8px"></span>
   <div style="flex:1"></div>
@@ -378,6 +420,11 @@
       <span>Connect to a stream or upload an image to begin</span>
     </div>
     <img id="videoFeed" src="" style="display:none">
+
+    <div class="debug-gallery" id="debugGallery" style="display:none">
+      <div class="debug-tabs" id="debugTabs"></div>
+      <div class="debug-image-container"><img id="debugImage" src=""></div>
+    </div>
 
     <div class="death-overlay" id="deathOverlay" style="display:none">
       <div class="count" id="sessionDeaths">0</div>
@@ -629,6 +676,25 @@ async function updateThreshold(val) {
   });
 }
 
+// Debug image data stored globally for tab switching
+let debugImageData = {};
+
+const DEBUG_TAB_ORDER = [
+  {key: 'original', label: 'Original'},
+  {key: 'template_match', label: 'Template Match'},
+  {key: 'edge_detection', label: 'Edge Detection'},
+  {key: 'color_mask', label: 'Color Mask'},
+  {key: 'brightness', label: 'Brightness'},
+  {key: 'fade_mask', label: 'Fade Mask'},
+];
+
+function showDebugImage(key) {
+  document.getElementById('debugImage').src = 'data:image/jpeg;base64,' + debugImageData[key];
+  document.querySelectorAll('.debug-tab').forEach(t => {
+    t.classList.toggle('active', t.dataset.key === key);
+  });
+}
+
 async function analyzeImage(input) {
   const file = input.files[0];
   if (!file) return;
@@ -659,6 +725,29 @@ async function analyzeImage(input) {
       <span style="font-weight:600;font-variant-numeric:tabular-nums">${v.toFixed(4)}</span>
     </div>`
   ).join('');
+
+  // Populate debug gallery
+  debugImageData = data.debug_images || {};
+  const tabsEl = document.getElementById('debugTabs');
+  tabsEl.innerHTML = '';
+  let firstKey = null;
+  for (const {key, label} of DEBUG_TAB_ORDER) {
+    if (!(key in debugImageData)) continue;
+    if (!firstKey) firstKey = key;
+    const btn = document.createElement('button');
+    btn.className = 'debug-tab';
+    btn.dataset.key = key;
+    btn.textContent = label;
+    btn.onclick = () => showDebugImage(key);
+    tabsEl.appendChild(btn);
+  }
+
+  if (firstKey) {
+    document.getElementById('placeholder').style.display = 'none';
+    document.getElementById('videoFeed').style.display = 'none';
+    document.getElementById('debugGallery').style.display = 'flex';
+    showDebugImage(firstKey);
+  }
 
   // Reset file input
   input.value = '';

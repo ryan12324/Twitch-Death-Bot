@@ -2,14 +2,17 @@
 Game profile definitions for death screen detection.
 
 Each profile describes visual characteristics of a game's death screen:
-- text_indicators: text strings that appear on death (used with OCR-free template matching)
 - dominant_colors: BGR color ranges that dominate the death screen
 - screen_regions: where on screen to look (normalized 0-1 coordinates)
 - template_dir: subdirectory under game_profiles/templates/ for reference images
 - cooldown_override: optional per-game cooldown override in seconds
+
+Profiles are loaded from individual JSON files in the game_profiles/ directory.
 """
 
+import json
 from dataclasses import dataclass, field
+from pathlib import Path
 
 
 @dataclass
@@ -48,133 +51,109 @@ class GameProfile:
     min_brightness: int | None = None
 
 
-# --- Game Profile Definitions ---
+# ---------------------------------------------------------------------------
+# JSON <-> dataclass conversion
+# ---------------------------------------------------------------------------
 
-ELDEN_RING = GameProfile(
-    name="elden_ring",
-    display_name="Elden Ring",
-    screen_regions=[
-        # "YOU DIED" text appears center screen
-        ScreenRegion(0.25, 0.35, 0.75, 0.65),
-    ],
-    dominant_colors=[
-        # Dark/black background with red text
-        ColorRange((0, 0, 100), (80, 80, 255)),   # Red text
-        ColorRange((0, 0, 0), (50, 50, 50)),       # Dark background
-    ],
-    template_dir="elden_ring",
-    fade_to_color=ColorRange((0, 0, 0), (40, 40, 40)),
-    max_brightness=60,
-)
+_PROFILES_DIR = Path(__file__).parent
 
-DARK_SOULS_2 = GameProfile(
-    name="dark_souls_2",
-    display_name="Dark Souls II",
-    screen_regions=[
-        # "YOU DIED" text appears center screen
-        ScreenRegion(0.25, 0.35, 0.75, 0.65),
-    ],
-    dominant_colors=[
-        ColorRange((0, 0, 100), (70, 70, 255)),   # Red/orange text
-        ColorRange((0, 0, 0), (45, 45, 45)),       # Dark background
-    ],
-    template_dir="dark_souls_2",
-    fade_to_color=ColorRange((0, 0, 0), (40, 40, 40)),
-    max_brightness=55,
-)
 
-DARK_SOULS_3 = GameProfile(
-    name="dark_souls_3",
-    display_name="Dark Souls III",
-    screen_regions=[
-        # "YOU DIED" center screen, similar to Elden Ring
-        ScreenRegion(0.25, 0.35, 0.75, 0.65),
-    ],
-    dominant_colors=[
-        ColorRange((0, 0, 120), (60, 60, 255)),   # Red text
-        ColorRange((0, 0, 0), (40, 40, 40)),       # Black background
-    ],
-    template_dir="dark_souls_3",
-    fade_to_color=ColorRange((0, 0, 0), (40, 40, 40)),
-    max_brightness=55,
-)
+def _parse_color_range(data: dict) -> ColorRange:
+    return ColorRange(lower=tuple(data["lower"]), upper=tuple(data["upper"]))
 
-SEKIRO = GameProfile(
-    name="sekiro",
-    display_name="Sekiro: Shadows Die Twice",
-    screen_regions=[
-        # Large kanji/text appears center screen on death
-        ScreenRegion(0.20, 0.25, 0.80, 0.75),
-    ],
-    dominant_colors=[
-        ColorRange((0, 0, 150), (50, 50, 255)),   # Red kanji
-        ColorRange((0, 0, 0), (30, 30, 30)),       # Black background
-    ],
-    template_dir="sekiro",
-    fade_to_color=ColorRange((0, 0, 0), (35, 35, 35)),
-    max_brightness=50,
-)
 
-HOLLOW_KNIGHT = GameProfile(
-    name="hollow_knight",
-    display_name="Hollow Knight",
-    screen_regions=[
-        # Death shade appears, screen goes dark
-        ScreenRegion(0.10, 0.10, 0.90, 0.90),
-    ],
-    dominant_colors=[
-        ColorRange((0, 0, 0), (30, 30, 30)),       # Very dark screen
-    ],
-    template_dir="hollow_knight",
-    fade_to_color=ColorRange((0, 0, 0), (25, 25, 25)),
-    max_brightness=35,
-    cooldown_override=10,
-)
+def _parse_profile(data: dict) -> GameProfile:
+    return GameProfile(
+        name=data["name"],
+        display_name=data["display_name"],
+        template_dir=data.get("template_dir", ""),
+        screen_regions=[
+            ScreenRegion(r["x_min"], r["y_min"], r["x_max"], r["y_max"])
+            for r in data.get("screen_regions", [])
+        ],
+        dominant_colors=[
+            _parse_color_range(c) for c in data.get("dominant_colors", [])
+        ],
+        fade_to_color=(
+            _parse_color_range(data["fade_to_color"])
+            if data.get("fade_to_color")
+            else None
+        ),
+        max_brightness=data.get("max_brightness"),
+        min_brightness=data.get("min_brightness"),
+        cooldown_override=data.get("cooldown_override"),
+    )
 
-CELESTE = GameProfile(
-    name="celeste",
-    display_name="Celeste",
-    screen_regions=[
-        # Death burst happens at player position (anywhere on screen)
-        ScreenRegion(0.0, 0.0, 1.0, 1.0),
-    ],
-    dominant_colors=[
-        # Screen flashes/freezes briefly
-        ColorRange((200, 200, 200), (255, 255, 255)),  # White flash
-    ],
-    template_dir="celeste",
-    cooldown_override=3,  # Celeste deaths are fast
-    min_brightness=200,
-)
 
-GENERIC = GameProfile(
-    name="generic",
-    display_name="Generic (Any Game)",
-    screen_regions=[
-        # Check the whole center area
-        ScreenRegion(0.15, 0.20, 0.85, 0.80),
-    ],
-    dominant_colors=[
-        # Dark/black fade is the most common death indicator
-        ColorRange((0, 0, 0), (45, 45, 45)),
-        # Red tint also common
-        ColorRange((0, 0, 80), (60, 60, 220)),
-    ],
-    template_dir="generic",
-    fade_to_color=ColorRange((0, 0, 0), (45, 45, 45)),
-    max_brightness=50,
-)
+def profile_to_dict(profile: GameProfile) -> dict:
+    """Serialize a GameProfile to a JSON-compatible dict."""
+    def _cr(cr: ColorRange) -> dict:
+        return {"lower": list(cr.lower), "upper": list(cr.upper)}
 
-# Registry of all profiles
-PROFILES: dict[str, GameProfile] = {
-    "elden_ring": ELDEN_RING,
-    "dark_souls_2": DARK_SOULS_2,
-    "dark_souls_3": DARK_SOULS_3,
-    "sekiro": SEKIRO,
-    "hollow_knight": HOLLOW_KNIGHT,
-    "celeste": CELESTE,
-    "generic": GENERIC,
-}
+    return {
+        "name": profile.name,
+        "display_name": profile.display_name,
+        "template_dir": profile.template_dir,
+        "screen_regions": [
+            {"x_min": r.x_min, "y_min": r.y_min, "x_max": r.x_max, "y_max": r.y_max}
+            for r in profile.screen_regions
+        ],
+        "dominant_colors": [_cr(c) for c in profile.dominant_colors],
+        "fade_to_color": _cr(profile.fade_to_color) if profile.fade_to_color else None,
+        "max_brightness": profile.max_brightness,
+        "min_brightness": profile.min_brightness,
+        "cooldown_override": profile.cooldown_override,
+    }
+
+
+def _load_profiles() -> dict[str, GameProfile]:
+    """Scan game_profiles/*.json and return a dict of name -> GameProfile."""
+    profiles: dict[str, GameProfile] = {}
+    for path in sorted(_PROFILES_DIR.glob("*.json")):
+        try:
+            data = json.loads(path.read_text())
+            profile = _parse_profile(data)
+            profiles[profile.name] = profile
+        except Exception as e:
+            print(f"Warning: failed to load profile {path}: {e}")
+    return profiles
+
+
+def reload_profiles() -> None:
+    """Reload all profiles from disk (clears and repopulates PROFILES in-place)."""
+    PROFILES.clear()
+    PROFILES.update(_load_profiles())
+
+
+def save_profile(data: dict) -> GameProfile:
+    """Validate, write a profile JSON file, and reload."""
+    name = data.get("name", "").strip()
+    if not name:
+        raise ValueError("Profile name is required")
+    # Ensure we can parse it
+    profile = _parse_profile(data)
+    path = _PROFILES_DIR / f"{name}.json"
+    path.write_text(json.dumps(profile_to_dict(profile), indent=2) + "\n")
+    reload_profiles()
+    return profile
+
+
+def delete_profile(name: str) -> None:
+    """Delete a profile's JSON file and reload."""
+    if name == "generic":
+        raise ValueError("Cannot delete the generic profile")
+    path = _PROFILES_DIR / f"{name}.json"
+    if not path.exists():
+        raise FileNotFoundError(f"Profile '{name}' not found")
+    path.unlink()
+    reload_profiles()
+
+
+# ---------------------------------------------------------------------------
+# Module-level registry (populated at import time)
+# ---------------------------------------------------------------------------
+
+PROFILES: dict[str, GameProfile] = _load_profiles()
 
 
 def get_profile(name: str) -> GameProfile:
