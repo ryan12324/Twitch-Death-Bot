@@ -122,91 +122,117 @@ def _detection_thread():
         # Draw detection overlay on the frame
         display = frame.copy()
         h, w = display.shape[:2]
+        profile = detector.profile
+        configured = scores.get("configured", [])
 
-        # Draw score bars on the right side
+        # ── Draw screen regions ──
+        if profile.screen_regions:
+            for region in profile.screen_regions:
+                x1 = int(region.x_min * w)
+                y1 = int(region.y_min * h)
+                x2 = int(region.x_max * w)
+                y2 = int(region.y_max * h)
+                cv2.rectangle(display, (x1, y1), (x2, y2), (187, 102, 255), 2)
+
+        # ── Draw color mask highlights (semi-transparent green) ──
+        if profile.dominant_colors and "color" in configured:
+            for cr in profile.dominant_colors:
+                lower = np.array(cr.lower, dtype=np.uint8)
+                upper = np.array(cr.upper, dtype=np.uint8)
+                mask = cv2.inRange(frame, lower, upper)
+                green = np.zeros_like(display)
+                green[:, :, 1] = 100
+                display[mask > 0] = cv2.addWeighted(
+                    display, 0.6, green, 0.4, 0
+                )[mask > 0]
+
+        # ── Draw template match box (if detector tracked it) ──
+        if hasattr(detector, '_last_match_loc') and detector._last_match_loc:
+            loc, size, score_val = detector._last_match_loc
+            match_color = (0, 255, 0) if score_val > 0.75 else (0, 165, 255)
+            cv2.rectangle(
+                display,
+                (loc[0], loc[1]),
+                (loc[0] + size[0], loc[1] + size[1]),
+                match_color, 2,
+            )
+            cv2.putText(
+                display,
+                f"tmpl: {score_val:.3f}",
+                (loc[0], loc[1] - 6),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.5, match_color, 1,
+            )
+
+        # ── Draw text detection boxes (if detector tracked them) ──
+        if hasattr(detector, '_last_text_boxes') and detector._last_text_boxes:
+            for bbox, text, conf_val, matched in detector._last_text_boxes:
+                color = (0, 255, 0) if matched else (128, 128, 128)
+                pts = np.array(bbox, dtype=np.int32)
+                cv2.polylines(display, [pts], True, color, 2)
+                cv2.putText(
+                    display,
+                    f"{text} ({conf_val:.2f})",
+                    (pts[0][0], pts[0][1] - 6),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.4, color, 1,
+                )
+
+        # ── Score bars on the right side ──
         bar_x = w - 200
         bar_w = 180
         bar_h = 18
         y_offset = 20
-        bar_colors = {
-            "template": (180, 120, 0),
-            "color": (0, 180, 0),
-            "brightness": (0, 180, 180),
-            "fade": (180, 0, 180),
-            "scene_change": (0, 100, 255),
-        }
-        for label, score in scores.items():
-            if label == "confidence":
-                continue
-            color = bar_colors.get(label, (200, 200, 200))
-            # Background
-            cv2.rectangle(
-                display,
-                (bar_x, y_offset),
-                (bar_x + bar_w, y_offset + bar_h),
-                (40, 40, 40),
-                -1,
-            )
+        bar_items = [
+            ("template", (180, 120, 0)),
+            ("text", (0, 140, 255)),
+            ("color", (0, 180, 0)),
+            ("brightness", (0, 180, 180)),
+            ("fade", (180, 0, 180)),
+            ("scene_change", (0, 100, 255)),
+        ]
+        for label, color in bar_items:
+            score_val = scores.get(label, 0)
+            is_conf = label in configured
+            # Semi-transparent background
+            overlay_bg = display.copy()
+            cv2.rectangle(overlay_bg, (bar_x, y_offset), (bar_x + bar_w, y_offset + bar_h), (30, 30, 30), -1)
+            cv2.addWeighted(overlay_bg, 0.7, display, 0.3, 0, display)
             # Fill
-            fill_w = int(bar_w * min(1.0, score))
-            cv2.rectangle(
-                display,
-                (bar_x, y_offset),
-                (bar_x + fill_w, y_offset + bar_h),
-                color,
-                -1,
-            )
+            if is_conf:
+                fill_w = int(bar_w * min(1.0, score_val))
+                cv2.rectangle(display, (bar_x, y_offset), (bar_x + fill_w, y_offset + bar_h), color, -1)
             # Label
-            cv2.putText(
-                display,
-                f"{label}: {score:.2f}",
-                (bar_x + 4, y_offset + 14),
-                cv2.FONT_HERSHEY_SIMPLEX,
-                0.4,
-                (255, 255, 255),
-                1,
-            )
+            label_color = (255, 255, 255) if is_conf else (100, 100, 100)
+            txt = f"{label}: {score_val:.2f}" if is_conf else f"{label}: n/a"
+            cv2.putText(display, txt, (bar_x + 4, y_offset + 14), cv2.FONT_HERSHEY_SIMPLEX, 0.4, label_color, 1)
             y_offset += bar_h + 4
 
-        # Confidence bar (wider)
+        # ── Confidence bar (wider) ──
         y_offset += 4
-        conf = scores["confidence"]
+        conf = scores.get("confidence", 0)
         threshold = detector.threshold
         conf_color = (0, 0, 255) if conf >= threshold else (100, 100, 100)
+        overlay_bg = display.copy()
+        cv2.rectangle(overlay_bg, (bar_x, y_offset), (bar_x + bar_w, y_offset + 24), (30, 30, 30), -1)
+        cv2.addWeighted(overlay_bg, 0.7, display, 0.3, 0, display)
         cv2.rectangle(
-            display, (bar_x, y_offset), (bar_x + bar_w, y_offset + 24), (40, 40, 40), -1
-        )
-        cv2.rectangle(
-            display,
-            (bar_x, y_offset),
+            display, (bar_x, y_offset),
             (bar_x + int(bar_w * min(1.0, conf)), y_offset + 24),
-            conf_color,
-            -1,
+            conf_color, -1,
         )
-        # Threshold marker line
         tx = bar_x + int(bar_w * threshold)
         cv2.line(display, (tx, y_offset), (tx, y_offset + 24), (0, 255, 255), 2)
         cv2.putText(
-            display,
-            f"CONFIDENCE: {conf:.3f} (threshold: {threshold})",
-            (bar_x + 4, y_offset + 18),
-            cv2.FONT_HERSHEY_SIMPLEX,
-            0.4,
-            (255, 255, 255),
-            1,
+            display, f"CONF: {conf:.3f} (thr: {threshold})",
+            (bar_x + 4, y_offset + 18), cv2.FONT_HERSHEY_SIMPLEX, 0.4, (255, 255, 255), 1,
         )
 
-        # Death flash
+        # ── Death flash ──
         if is_death:
             cv2.rectangle(display, (0, 0), (w, h), (0, 0, 255), 8)
             cv2.putText(
-                display,
-                "DEATH DETECTED",
+                display, "DEATH DETECTED",
                 (w // 2 - 180, h // 2),
-                cv2.FONT_HERSHEY_SIMPLEX,
-                1.5,
-                (0, 0, 255),
-                3,
+                cv2.FONT_HERSHEY_SIMPLEX, 1.5, (0, 0, 255), 3,
             )
 
         jpg = _encode_frame_jpg(display)

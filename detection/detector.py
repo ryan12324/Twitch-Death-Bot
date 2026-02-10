@@ -156,6 +156,7 @@ class DeathDetector:
         """
         if not self.templates:
             logger.info("template_match: no templates loaded, returning 0.0")
+            self._last_match_loc = None
             return 0.0
 
         frame_gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
@@ -165,6 +166,7 @@ class DeathDetector:
         logger.info("template_match: frame=%dx%d, %d template(s)", frame_w, frame_h, len(self.templates))
 
         best_score = 0.0
+        best_match_loc = None  # ((x, y), (w, h), score)
 
         for t_idx, template in enumerate(self.templates):
             tmpl_h, tmpl_w = template.shape[:2]
@@ -195,27 +197,26 @@ class DeathDetector:
                 scaled_edges = cv2.Canny(scaled, 50, 150)
 
                 # Build search areas from screen regions, fall back to full frame
-                search_areas_gray = []
-                search_areas_edge = []
+                search_areas = []  # (gray, edge, offset_x, offset_y)
                 if self.profile.screen_regions:
                     for region in self.profile.screen_regions:
                         area_g = self._extract_region(frame_gray, region)
                         area_e = self._extract_region(frame_edges, region)
                         if area_g.shape[0] > new_h and area_g.shape[1] > new_w:
-                            search_areas_gray.append(area_g)
-                            search_areas_edge.append(area_e)
+                            ox = int(region.x_min * frame_w)
+                            oy = int(region.y_min * frame_h)
+                            search_areas.append((area_g, area_e, ox, oy))
                         else:
                             logger.debug(
                                 "  scale=%.4f region too small (%dx%d) for template %dx%d",
                                 scale, area_g.shape[1], area_g.shape[0], new_w, new_h,
                             )
 
-                using_regions = len(search_areas_gray) > 0
-                if not search_areas_gray:
-                    search_areas_gray = [frame_gray]
-                    search_areas_edge = [frame_edges]
+                using_regions = len(search_areas) > 0
+                if not search_areas:
+                    search_areas = [(frame_gray, frame_edges, 0, 0)]
 
-                for area_g, area_e in zip(search_areas_gray, search_areas_edge):
+                for area_g, area_e, ox, oy in search_areas:
                     # Pixel-based match
                     result = cv2.matchTemplate(
                         area_g, scaled, cv2.TM_CCOEFF_NORMED
@@ -239,12 +240,26 @@ class DeathDetector:
                         best_score,
                     )
 
-                    best_score = max(best_score, max_val, max_val_e)
+                    # Track best match location for overlay
+                    if max_val > best_score:
+                        best_score = max_val
+                        best_match_loc = (
+                            (max_loc[0] + ox, max_loc[1] + oy),
+                            (new_w, new_h), max_val,
+                        )
+                    if max_val_e > best_score:
+                        best_score = max_val_e
+                        best_match_loc = (
+                            (max_loc_e[0] + ox, max_loc_e[1] + oy),
+                            (new_w, new_h), max_val_e,
+                        )
 
                     if best_score > 0.85:
                         logger.info("  EARLY EXIT: best_score=%.4f > 0.85", best_score)
+                        self._last_match_loc = best_match_loc
                         return best_score
 
+        self._last_match_loc = best_match_loc
         logger.info("template_match: final best_score=%.4f", best_score)
         return best_score
 
@@ -400,6 +415,7 @@ class DeathDetector:
         """
         if not self.profile.text_indicators:
             logger.info("text_detection: no text_indicators in profile, returning 0.0")
+            self._last_text_boxes = []
             return 0.0
 
         # Lazy-init EasyOCR reader
@@ -410,18 +426,27 @@ class DeathDetector:
                 logger.info("text_detection: EasyOCR reader initialized")
             except ImportError:
                 logger.warning("text_detection: easyocr not installed, returning 0.0")
+                self._last_text_boxes = []
                 return 0.0
 
-        # Build list of areas to scan
+        h, w = frame.shape[:2]
+
+        # Build list of areas to scan with offsets
+        search_areas = []
         if self.profile.screen_regions:
-            areas = [self._extract_region(frame, r) for r in self.profile.screen_regions]
+            for region in self.profile.screen_regions:
+                area = self._extract_region(frame, region)
+                ox = int(region.x_min * w)
+                oy = int(region.y_min * h)
+                search_areas.append((area, ox, oy))
         else:
-            areas = [frame]
+            search_areas.append((frame, 0, 0))
 
         indicators_lower = [t.lower() for t in self.profile.text_indicators]
         best_score = 0.0
+        text_boxes = []
 
-        for area in areas:
+        for area, ox, oy in search_areas:
             try:
                 results = self._ocr_reader.readtext(area)
             except Exception as e:
@@ -435,9 +460,13 @@ class DeathDetector:
                     "text_detection: detected '%s' confidence=%.4f matched=%s",
                     text, confidence, matched,
                 )
+                # Offset bbox to frame coordinates
+                offset_bbox = [[pt[0] + ox, pt[1] + oy] for pt in bbox]
+                text_boxes.append((offset_bbox, text, confidence, matched))
                 if matched:
                     best_score = max(best_score, confidence)
 
+        self._last_text_boxes = text_boxes
         logger.info("text_detection: final score=%.4f", best_score)
         return best_score
 
