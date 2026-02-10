@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Death Detector - Test</title>
+<title>Death Detector - Bot</title>
 <style>
   :root {
     --bg: #0e0e10;
@@ -303,32 +303,6 @@
     font-variant-numeric: tabular-nums;
   }
 
-  /* Upload area */
-  .upload-zone {
-    border: 2px dashed var(--border);
-    border-radius: 8px;
-    padding: 20px;
-    text-align: center;
-    cursor: pointer;
-    transition: border-color 0.2s;
-    margin-bottom: 12px;
-  }
-  .upload-zone:hover { border-color: var(--accent); }
-  .upload-zone input { display: none; }
-  .upload-zone p { color: var(--text-dim); font-size: 13px; }
-
-  .upload-result {
-    background: var(--surface2);
-    border-radius: 8px;
-    padding: 12px;
-    margin-top: 8px;
-    font-size: 13px;
-    display: none;
-  }
-  .upload-result.show { display: block; }
-  .upload-result .death-yes { color: var(--red); font-weight: 700; font-size: 16px; }
-  .upload-result .death-no { color: var(--green); font-weight: 700; font-size: 16px; }
-
   /* Tabs */
   .tabs {
     display: flex;
@@ -362,46 +336,166 @@
     padding: 4px 0;
   }
 
-  /* Debug gallery */
-  .debug-gallery {
+  /* Toggle switch */
+  .toggle-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 12px;
+  }
+  .toggle-row label {
+    font-size: 12px;
+    color: var(--text-dim);
+    font-weight: 500;
+  }
+  .toggle-switch {
+    position: relative;
+    width: 40px;
+    height: 22px;
+  }
+  .toggle-switch input {
+    opacity: 0;
+    width: 0;
+    height: 0;
+  }
+  .toggle-slider {
+    position: absolute;
+    cursor: pointer;
+    top: 0; left: 0; right: 0; bottom: 0;
+    background: var(--surface2);
+    border-radius: 22px;
+    border: 1px solid var(--border);
+    transition: 0.2s;
+  }
+  .toggle-slider::before {
+    content: "";
+    position: absolute;
+    height: 16px;
+    width: 16px;
+    left: 2px;
+    bottom: 2px;
+    background: var(--text-dim);
+    border-radius: 50%;
+    transition: 0.2s;
+  }
+  .toggle-switch input:checked + .toggle-slider {
+    background: var(--accent);
+    border-color: var(--accent);
+  }
+  .toggle-switch input:checked + .toggle-slider::before {
+    transform: translateX(18px);
+    background: white;
+  }
+
+  /* Chat styles */
+  .chat-container {
     display: flex;
     flex-direction: column;
     height: 100%;
   }
-  .debug-tabs {
+  .chat-status {
+    font-size: 11px;
+    padding: 6px 0;
     display: flex;
-    background: var(--surface);
-    border-bottom: 1px solid var(--border);
-    overflow-x: auto;
-    flex-shrink: 0;
+    align-items: center;
+    gap: 6px;
   }
-  .debug-tab {
-    padding: 8px 16px;
-    font-size: 12px;
-    font-weight: 600;
-    color: var(--text-dim);
-    cursor: pointer;
-    border: none;
-    background: none;
-    border-bottom: 2px solid transparent;
-    white-space: nowrap;
-    transition: all 0.15s;
+  .chat-status .dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    display: inline-block;
   }
-  .debug-tab:hover { color: var(--text); }
-  .debug-tab.active { color: var(--accent); border-bottom-color: var(--accent); }
-  .debug-image-container {
+  .chat-status .dot.connected { background: var(--green); }
+  .chat-status .dot.disconnected { background: var(--text-dim); }
+  .chat-messages {
     flex: 1;
+    overflow-y: auto;
+    max-height: 400px;
+    min-height: 200px;
+    padding: 4px 0;
+  }
+  .chat-msg {
+    padding: 3px 0;
+    font-size: 13px;
+    line-height: 1.4;
+    word-wrap: break-word;
+  }
+  .chat-msg .chat-name {
+    font-weight: 700;
+    margin-right: 4px;
+  }
+  .chat-msg .chat-text {
+    color: var(--text);
+  }
+  .chat-empty {
+    color: var(--text-dim);
+    font-size: 13px;
+    font-style: italic;
+    padding: 8px 0;
+  }
+
+  /* Clips styles */
+  .clip-list {
+    max-height: 300px;
+    overflow-y: auto;
+  }
+  .clip-entry {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 8px 0;
+    border-bottom: 1px solid var(--border);
+    font-size: 13px;
+    cursor: pointer;
+    transition: background 0.1s;
+    border-radius: 4px;
+    padding-left: 4px;
+    padding-right: 4px;
+  }
+  .clip-entry:hover { background: var(--surface2); }
+  .clip-entry .clip-num {
+    background: var(--accent);
+    color: white;
+    font-weight: 700;
+    min-width: 28px;
+    height: 28px;
+    border-radius: 50%;
     display: flex;
     align-items: center;
     justify-content: center;
+    font-size: 12px;
+    flex-shrink: 0;
+  }
+  .clip-entry .clip-info { flex: 1; }
+  .clip-entry .clip-info .clip-size {
+    color: var(--text-dim);
+    font-size: 11px;
+  }
+  .clip-player {
+    margin-bottom: 12px;
+    display: none;
+    border-radius: 8px;
     overflow: hidden;
     background: #000;
   }
-  .debug-image-container img {
-    max-width: 100%;
-    max-height: 100%;
-    object-fit: contain;
+  .clip-player video {
+    width: 100%;
+    display: block;
   }
+  .clip-empty {
+    color: var(--text-dim);
+    font-size: 13px;
+    font-style: italic;
+    padding: 8px 0;
+  }
+  .clip-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 12px;
+  }
+  .clip-header h2 { margin-bottom: 0; }
 </style>
 </head>
 <body>
@@ -409,8 +503,8 @@
 <div class="header">
   <a href="/" class="logo"><span>Death</span>Detector</a>
   <a href="/" class="nav-link">Home</a>
-  <a href="/test" class="nav-link active">Test</a>
-  <a href="/bot" class="nav-link">Bot</a>
+  <a href="/test" class="nav-link">Test</a>
+  <a href="/bot" class="nav-link active">Bot</a>
   <a href="/profiles" class="nav-link">Profiles</a>
   <span class="status-badge offline" id="statusBadge">Offline</span>
   <span class="frame-counter" id="templateCount" style="margin-left:8px"></span>
@@ -423,14 +517,9 @@
   <div class="video-area" id="videoArea">
     <div class="video-placeholder" id="placeholder">
       <svg width="48" height="48" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path d="M15.75 10.5l4.72-4.72a.75.75 0 011.28.53v11.38a.75.75 0 01-1.28.53l-4.72-4.72M4.5 18.75h9a2.25 2.25 0 002.25-2.25v-9A2.25 2.25 0 0013.5 5.25h-9A2.25 2.25 0 002.25 7.5v9a2.25 2.25 0 002.25 2.25z"/></svg>
-      <span>Connect to a stream or upload an image to begin</span>
+      <span>Enter a channel and click Start to begin</span>
     </div>
     <img id="videoFeed" src="" style="display:none">
-
-    <div class="debug-gallery" id="debugGallery" style="display:none">
-      <div class="debug-tabs" id="debugTabs"></div>
-      <div class="debug-image-container"><img id="debugImage" src=""></div>
-    </div>
 
     <div class="death-overlay" id="deathOverlay" style="display:none">
       <div class="count" id="sessionDeaths">0</div>
@@ -442,16 +531,16 @@
   <!-- Sidebar -->
   <div class="sidebar">
     <div class="tabs">
-      <button class="tab active" data-tab="connect">Stream</button>
-      <button class="tab" data-tab="upload">Image</button>
-      <button class="tab" data-tab="clip">Clip</button>
+      <button class="tab active" data-tab="stream">Stream</button>
+      <button class="tab" data-tab="chat">Chat</button>
+      <button class="tab" data-tab="clips">Clips</button>
       <button class="tab" data-tab="log">Deaths</button>
     </div>
 
-    <!-- Tab: Connect to stream -->
-    <div class="tab-content active" id="tab-connect">
+    <!-- Tab: Stream controls -->
+    <div class="tab-content active" id="tab-stream">
       <div class="panel">
-        <h2>Connect to Stream</h2>
+        <h2>Bot Controls</h2>
         <div class="form-row">
           <label>Twitch Channel</label>
           <input type="text" id="channelInput" placeholder="e.g. shroud">
@@ -490,66 +579,50 @@
           <label>Cooldown (seconds)</label>
           <input type="number" id="cooldownInput" value="15" min="1" max="120">
         </div>
+        <div class="form-row">
+          <label>Twitch Token (optional, falls back to TWITCH_TOKEN env)</label>
+          <input type="password" id="twitchTokenInput" placeholder="oauth:...">
+        </div>
+        <div class="toggle-row">
+          <label>Death Announcements</label>
+          <label class="toggle-switch">
+            <input type="checkbox" id="messagesToggle" checked onchange="toggleMessages()">
+            <span class="toggle-slider"></span>
+          </label>
+        </div>
         <div class="btn-row">
-          <button class="btn btn-primary" id="startBtn" onclick="startDetection()">Start</button>
-          <button class="btn btn-danger" id="stopBtn" onclick="stopDetection()" disabled>Stop</button>
+          <button class="btn btn-primary" id="startBtn" onclick="startBot()">Start</button>
+          <button class="btn btn-danger" id="stopBtn" onclick="stopBot()" disabled>Stop</button>
         </div>
       </div>
     </div>
 
-    <!-- Tab: Upload image -->
-    <div class="tab-content" id="tab-upload">
-      <div class="panel">
-        <h2>Test Single Image</h2>
-        <p style="font-size:13px;color:var(--text-dim);margin-bottom:12px">
-          Upload a screenshot to test detection without connecting to a stream.
-        </p>
-        <div class="form-row">
-          <label>Game Profile</label>
-          <select id="uploadProfileSelect">
-            {% for p in profiles %}
-            <option value="{{ p }}" {{ 'selected' if p == 'elden_ring' else '' }}>{{ p }}</option>
-            {% endfor %}
-          </select>
+    <!-- Tab: Chat -->
+    <div class="tab-content" id="tab-chat">
+      <div class="panel" style="display:flex;flex-direction:column;height:calc(100vh - 53px - 42px - 33px)">
+        <div class="chat-status" id="chatStatus">
+          <span class="dot disconnected" id="chatDot"></span>
+          <span id="chatStatusText">Not connected</span>
         </div>
-        <div class="upload-zone" id="uploadZone" onclick="document.getElementById('fileInput').click()">
-          <input type="file" id="fileInput" accept="image/*" onchange="analyzeImage(this)">
-          <p>Click or drag an image here</p>
-        </div>
-        <div class="upload-result" id="uploadResult">
-          <div id="uploadVerdict"></div>
-          <div id="uploadScores" style="margin-top:8px"></div>
+        <div class="chat-messages" id="chatMessages">
+          <div class="chat-empty">Chat messages will appear here when connected.</div>
         </div>
       </div>
     </div>
 
-    <!-- Tab: Clip -->
-    <div class="tab-content" id="tab-clip">
+    <!-- Tab: Clips -->
+    <div class="tab-content" id="tab-clips">
       <div class="panel">
-        <h2>Test Twitch Clip</h2>
-        <p style="font-size:13px;color:var(--text-dim);margin-bottom:12px">
-          Paste a Twitch clip URL to test detection across all frames.
-        </p>
-        <div class="form-row">
-          <label>Game Profile</label>
-          <select id="clipProfileSelect">
-            {% for p in profiles %}
-            <option value="{{ p }}" {{ 'selected' if p == 'elden_ring' else '' }}>{{ p }}</option>
-            {% endfor %}
-          </select>
+        <div class="clip-header">
+          <h2>Saved Clips</h2>
+          <button class="btn btn-secondary" style="width:auto;padding:6px 12px;font-size:12px" onclick="refreshClips()">Refresh</button>
         </div>
-        <div class="form-row">
-          <label>Clip URL</label>
-          <input type="text" id="clipUrlInput" placeholder="e.g. tessdaily/clip/KawaiiRelievedPan...">
+        <div class="clip-player" id="clipPlayer">
+          <video id="clipVideo" controls></video>
         </div>
-        <button class="btn btn-primary" id="clipAnalyzeBtn" onclick="analyzeClip()">Analyze Clip</button>
-        <div id="clipStatus" style="font-size:13px;color:var(--text-dim);margin-top:8px;display:none"></div>
-        <div class="upload-result" id="clipResult">
-          <div id="clipVerdict"></div>
-          <div id="clipScores" style="margin-top:8px"></div>
+        <div class="clip-list" id="clipList">
+          <div class="clip-empty">No clips recorded yet.</div>
         </div>
-        <!-- Confidence timeline chart -->
-        <canvas id="clipTimeline" width="360" height="100" style="display:none;width:100%;margin-top:12px;border-radius:6px;background:var(--surface2)"></canvas>
       </div>
     </div>
 
@@ -586,7 +659,7 @@
 </div>
 
 <script>
-// Tabs
+// ── Tabs ──
 document.querySelectorAll('.tab').forEach(tab => {
   tab.addEventListener('click', () => {
     document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
@@ -599,14 +672,17 @@ document.querySelectorAll('.tab').forEach(tab => {
 let pollInterval = null;
 let videoWs = null;
 let prevBlobUrl = null;
+let chatWs = null;
+let lastClipCount = 0;
 
-async function startDetection() {
+// ── Start Bot ──
+async function startBot() {
   const channel = document.getElementById('channelInput').value.trim();
   if (!channel) { alert('Enter a channel name'); return; }
 
   document.getElementById('startBtn').disabled = true;
 
-  const res = await fetch('/api/start', {
+  const res = await fetch('/api/bot/start', {
     method: 'POST',
     headers: {'Content-Type': 'application/json'},
     body: JSON.stringify({
@@ -616,6 +692,7 @@ async function startDetection() {
       cooldown: parseInt(document.getElementById('cooldownInput').value),
       quality: document.getElementById('qualitySelect').value,
       target_fps: parseInt(document.getElementById('fpsSelect').value),
+      twitch_token: document.getElementById('twitchTokenInput').value.trim(),
     }),
   });
 
@@ -630,25 +707,49 @@ async function startDetection() {
   const tmpl = data.templates_loaded || 0;
   document.getElementById('templateCount').textContent = tmpl > 0
     ? tmpl + ' template(s) loaded'
-    : 'No templates loaded (detection uses color/brightness only)';
+    : 'No templates loaded';
   document.getElementById('templateCount').style.color = tmpl > 0 ? '#00c853' : '#ffc107';
 
-  // Hide placeholder, debug gallery
+  // Update UI
   document.getElementById('placeholder').style.display = 'none';
-  document.getElementById('debugGallery').style.display = 'none';
   document.getElementById('deathOverlay').style.display = 'block';
   document.getElementById('statusBadge').className = 'status-badge live';
   document.getElementById('statusBadge').textContent = 'Live';
   document.getElementById('stopBtn').disabled = false;
 
-  // Start JPEG-over-WebSocket stream
+  // Start video WS
   startVideoWS();
 
-  // Start polling status
+  // Connect to Twitch chat
+  connectChat(channel);
+
+  // Start polling
   if (pollInterval) clearInterval(pollInterval);
   pollInterval = setInterval(pollStatus, 500);
+
+  // Refresh clips
+  refreshClips();
 }
 
+// ── Stop Bot ──
+async function stopBot() {
+  await fetch('/api/bot/stop', {method: 'POST'});
+
+  stopVideoWS();
+  disconnectChat();
+
+  document.getElementById('videoFeed').style.display = 'none';
+  document.getElementById('videoFeed').src = '';
+  document.getElementById('placeholder').style.display = '';
+  document.getElementById('deathOverlay').style.display = 'none';
+  document.getElementById('statusBadge').className = 'status-badge offline';
+  document.getElementById('statusBadge').textContent = 'Offline';
+  document.getElementById('startBtn').disabled = false;
+  document.getElementById('stopBtn').disabled = true;
+  if (pollInterval) { clearInterval(pollInterval); pollInterval = null; }
+}
+
+// ── Video WebSocket ──
 function startVideoWS() {
   const img = document.getElementById('videoFeed');
   img.style.display = 'block';
@@ -665,7 +766,6 @@ function startVideoWS() {
   };
 
   videoWs.onerror = () => {
-    // Fall back to MJPEG if WS fails
     stopVideoWS();
     img.src = '/video_feed?' + Date.now();
   };
@@ -686,25 +786,10 @@ function stopVideoWS() {
   }
 }
 
-async function stopDetection() {
-  await fetch('/api/stop', {method: 'POST'});
-
-  // Clean up video
-  stopVideoWS();
-  document.getElementById('videoFeed').style.display = 'none';
-  document.getElementById('videoFeed').src = '';
-  document.getElementById('placeholder').style.display = '';
-  document.getElementById('deathOverlay').style.display = 'none';
-  document.getElementById('statusBadge').className = 'status-badge offline';
-  document.getElementById('statusBadge').textContent = 'Offline';
-  document.getElementById('startBtn').disabled = false;
-  document.getElementById('stopBtn').disabled = true;
-  if (pollInterval) { clearInterval(pollInterval); pollInterval = null; }
-}
-
+// ── Poll Status ──
 async function pollStatus() {
   try {
-    const res = await fetch('/api/status');
+    const res = await fetch('/api/bot/status');
     const data = await res.json();
 
     // Update scores
@@ -724,7 +809,7 @@ async function pollStatus() {
     document.getElementById('s-confidence').textContent = conf.toFixed(3);
     document.getElementById('b-confidence').style.width = (conf * 100) + '%';
 
-    // Update threshold marker
+    // Threshold marker
     const threshold = data.threshold || 0.80;
     document.getElementById('thresholdMarker').style.left = (threshold * 100) + '%';
 
@@ -739,6 +824,19 @@ async function pollStatus() {
       ? tl + ' template(s)'
       : 'No templates';
     document.getElementById('templateCount').style.color = tl > 0 ? '#00c853' : '#ffc107';
+
+    // Messages toggle sync
+    const toggle = document.getElementById('messagesToggle');
+    if (toggle && !toggle.matches(':focus')) {
+      toggle.checked = data.messages_enabled;
+    }
+
+    // Auto-refresh clips when count changes
+    const clipCount = data.clip_count || 0;
+    if (clipCount !== lastClipCount) {
+      lastClipCount = clipCount;
+      refreshClips();
+    }
 
     // Death log
     const log = data.death_log || [];
@@ -759,6 +857,7 @@ async function pollStatus() {
   } catch (e) { /* ignore poll errors */ }
 }
 
+// ── Threshold ──
 async function updateThreshold(val) {
   document.getElementById('thresholdVal').textContent = parseFloat(val).toFixed(2);
   document.getElementById('thresholdMarker').style.left = (val * 100) + '%';
@@ -769,328 +868,168 @@ async function updateThreshold(val) {
   });
 }
 
-// Debug image data stored globally for tab switching
-let debugImageData = {};
-
-const DEBUG_TAB_ORDER = [
-  {key: 'original', label: 'Original'},
-  {key: 'template_match', label: 'Template Match'},
-  {key: 'edge_detection', label: 'Edge Detection'},
-  {key: 'text_detection', label: 'Text Detection'},
-  {key: 'color_mask', label: 'Color Mask'},
-  {key: 'brightness', label: 'Brightness'},
-  {key: 'fade_mask', label: 'Fade Mask'},
-];
-
-function showDebugImage(key) {
-  document.getElementById('debugImage').src = 'data:image/jpeg;base64,' + debugImageData[key];
-  document.querySelectorAll('.debug-tab').forEach(t => {
-    t.classList.toggle('active', t.dataset.key === key);
+// ── Toggle Messages ──
+async function toggleMessages() {
+  const enabled = document.getElementById('messagesToggle').checked;
+  await fetch('/api/bot/messages', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({enabled}),
   });
 }
 
-async function analyzeImage(input) {
-  const file = input.files[0];
-  if (!file) return;
-
-  const form = new FormData();
-  form.append('image', file);
-  form.append('profile', document.getElementById('uploadProfileSelect').value);
-  form.append('threshold', document.getElementById('thresholdSlider').value);
-
-  const res = await fetch('/api/analyze_image', {method: 'POST', body: form});
-  const data = await res.json();
-
-  const resultEl = document.getElementById('uploadResult');
-  resultEl.classList.add('show');
-
-  const verdictEl = document.getElementById('uploadVerdict');
-  const confVal = (data.scores || {}).confidence || 0;
-  if (data.is_death) {
-    verdictEl.innerHTML = `<span class="death-yes">DEATH DETECTED</span> <span style="font-size:13px;color:var(--text-dim)">confidence: ${confVal.toFixed(4)}</span>`;
-  } else {
-    verdictEl.innerHTML = `<span class="death-no">No death detected</span> <span style="font-size:13px;color:var(--text-dim)">confidence: ${confVal.toFixed(4)}</span>`;
-  }
-
-  // Update sidebar score bars (same display as live stream)
-  const s = data.scores || {};
-  const uploadConfigured = s.configured || [];
-  for (const key of ['template', 'text', 'color', 'brightness', 'fade', 'scene_change']) {
-    const val = s[key] || 0;
-    const el = document.getElementById('s-' + key);
-    const bar = document.getElementById('b-' + key);
-    const barParent = bar ? bar.closest('.score-bar') : null;
-    const isConfigured = key === 'scene_change' || uploadConfigured.length === 0 || uploadConfigured.includes(key);
-    if (barParent) barParent.classList.toggle('unconfigured', !isConfigured);
-    if (el) el.textContent = isConfigured ? val.toFixed(4) : '(not configured)';
-    if (bar) bar.style.width = isConfigured ? (val * 100) + '%' : '0%';
-  }
-  const conf = s.confidence || 0;
-  document.getElementById('s-confidence').textContent = conf.toFixed(4);
-  document.getElementById('b-confidence').style.width = (conf * 100) + '%';
-
-  // Also show scores in the upload result panel
-  const scoresEl = document.getElementById('uploadScores');
-  scoresEl.innerHTML = Object.entries(s)
-    .filter(([k]) => k !== 'configured')
-    .map(([k, v]) => {
-      const isConf = k === 'scene_change' || k === 'confidence' || uploadConfigured.length === 0 || uploadConfigured.includes(k);
-      const dimStyle = isConf ? 'color:var(--text-dim)' : 'color:#555';
-      const valText = isConf ? v.toFixed(4) : '(not configured)';
-      const valStyle = isConf ? 'font-weight:600;font-variant-numeric:tabular-nums' : 'color:#555;font-size:11px';
-      return `<div style="display:flex;justify-content:space-between;font-size:12px;padding:2px 0">
-        <span style="${dimStyle}">${k}</span>
-        <span style="${valStyle}">${valText}</span>
-      </div>`;
-    }).join('');
-
-  // Populate debug gallery
-  debugImageData = data.debug_images || {};
-  const tabsEl = document.getElementById('debugTabs');
-  tabsEl.innerHTML = '';
-  let firstKey = null;
-  for (const {key, label} of DEBUG_TAB_ORDER) {
-    if (!(key in debugImageData)) continue;
-    if (!firstKey) firstKey = key;
-    const btn = document.createElement('button');
-    btn.className = 'debug-tab';
-    btn.dataset.key = key;
-    btn.textContent = label;
-    btn.onclick = () => showDebugImage(key);
-    tabsEl.appendChild(btn);
-  }
-
-  if (firstKey) {
-    document.getElementById('placeholder').style.display = 'none';
-    document.getElementById('videoFeed').style.display = 'none';
-    document.getElementById('debugGallery').style.display = 'flex';
-    showDebugImage(firstKey);
-  }
-
-  // Reset file input
-  input.value = '';
+// ── Twitch Chat (browser-side IRC) ──
+function escapeHtml(str) {
+  const div = document.createElement('div');
+  div.textContent = str;
+  return div.innerHTML;
 }
 
-async function analyzeClip() {
-  const url = document.getElementById('clipUrlInput').value.trim();
-  if (!url) { alert('Enter a clip URL'); return; }
+function parseIRCMessage(raw) {
+  // Parse IRC message with @tags
+  let tags = {};
+  let rest = raw;
 
-  const btn = document.getElementById('clipAnalyzeBtn');
-  const statusEl = document.getElementById('clipStatus');
-  btn.disabled = true;
-  btn.textContent = 'Downloading & analyzing...';
-  statusEl.style.display = 'block';
-  statusEl.textContent = 'Downloading clip and extracting frames...';
-
-  try {
-    const res = await fetch('/api/analyze_clip', {
-      method: 'POST',
-      headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({
-        url,
-        profile: document.getElementById('clipProfileSelect').value,
-        threshold: parseFloat(document.getElementById('thresholdSlider').value),
-      }),
+  if (rest.startsWith('@')) {
+    const spaceIdx = rest.indexOf(' ');
+    const tagStr = rest.substring(1, spaceIdx);
+    rest = rest.substring(spaceIdx + 1);
+    tagStr.split(';').forEach(pair => {
+      const eq = pair.indexOf('=');
+      if (eq !== -1) {
+        tags[pair.substring(0, eq)] = pair.substring(eq + 1);
+      }
     });
-    const data = await res.json();
+  }
 
-    if (!res.ok) {
-      alert(data.error || 'Failed to analyze clip');
-      statusEl.textContent = 'Error: ' + (data.error || 'unknown');
+  // Parse :nick!user@host COMMAND #channel :message
+  const match = rest.match(/^:(\S+)\s+(\S+)\s+(\S+)\s*:?(.*)/);
+  if (!match) return null;
+
+  return {
+    prefix: match[1],
+    command: match[2],
+    channel: match[3],
+    text: match[4],
+    tags,
+    displayName: tags['display-name'] || match[1].split('!')[0],
+    color: tags['color'] || '#adadb8',
+  };
+}
+
+function appendChatMessage(msg) {
+  const container = document.getElementById('chatMessages');
+  // Remove empty placeholder
+  const empty = container.querySelector('.chat-empty');
+  if (empty) empty.remove();
+
+  const div = document.createElement('div');
+  div.className = 'chat-msg';
+  div.innerHTML = `<span class="chat-name" style="color:${escapeHtml(msg.color)}">${escapeHtml(msg.displayName)}</span><span class="chat-text">${escapeHtml(msg.text)}</span>`;
+  container.appendChild(div);
+
+  // Cap at 200 messages
+  while (container.children.length > 200) {
+    container.removeChild(container.firstChild);
+  }
+
+  // Auto-scroll if near bottom
+  if (container.scrollHeight - container.scrollTop - container.clientHeight < 100) {
+    container.scrollTop = container.scrollHeight;
+  }
+}
+
+function connectChat(channel) {
+  disconnectChat();
+
+  const nick = 'justinfan' + Math.floor(Math.random() * 99999);
+
+  chatWs = new WebSocket('wss://irc-ws.chat.twitch.tv:443');
+
+  chatWs.onopen = () => {
+    chatWs.send('CAP REQ :twitch.tv/tags');
+    chatWs.send('PASS oauth:none');
+    chatWs.send('NICK ' + nick);
+    chatWs.send('JOIN #' + channel.toLowerCase());
+
+    document.getElementById('chatDot').className = 'dot connected';
+    document.getElementById('chatStatusText').textContent = 'Connected to #' + channel;
+  };
+
+  chatWs.onmessage = (event) => {
+    const lines = event.data.split('\r\n');
+    for (const line of lines) {
+      if (!line) continue;
+
+      // Handle PING
+      if (line.startsWith('PING')) {
+        chatWs.send('PONG :tmi.twitch.tv');
+        continue;
+      }
+
+      // Parse PRIVMSG
+      if (line.includes('PRIVMSG')) {
+        const parsed = parseIRCMessage(line);
+        if (parsed && parsed.command === 'PRIVMSG') {
+          appendChatMessage(parsed);
+        }
+      }
+    }
+  };
+
+  chatWs.onerror = () => {
+    document.getElementById('chatDot').className = 'dot disconnected';
+    document.getElementById('chatStatusText').textContent = 'Connection error';
+  };
+
+  chatWs.onclose = () => {
+    document.getElementById('chatDot').className = 'dot disconnected';
+    document.getElementById('chatStatusText').textContent = 'Disconnected';
+  };
+}
+
+function disconnectChat() {
+  if (chatWs) {
+    chatWs.close();
+    chatWs = null;
+  }
+  document.getElementById('chatDot').className = 'dot disconnected';
+  document.getElementById('chatStatusText').textContent = 'Not connected';
+}
+
+// ── Clips ──
+async function refreshClips() {
+  try {
+    const res = await fetch('/api/bot/clips');
+    const clips = await res.json();
+
+    const listEl = document.getElementById('clipList');
+    if (!clips.length) {
+      listEl.innerHTML = '<div class="clip-empty">No clips recorded yet.</div>';
       return;
     }
 
-    statusEl.style.display = 'none';
-
-    // Show verdict
-    const resultEl = document.getElementById('clipResult');
-    resultEl.classList.add('show');
-    const verdictEl = document.getElementById('clipVerdict');
-    const confVal = (data.scores || {}).confidence || 0;
-    if (data.is_death) {
-      verdictEl.innerHTML = `<span class="death-yes">DEATH DETECTED</span> <span style="font-size:13px;color:var(--text-dim)">confidence: ${confVal.toFixed(4)} &middot; at ${data.best_frame_time}s</span>`;
-    } else {
-      verdictEl.innerHTML = `<span class="death-no">No death detected</span> <span style="font-size:13px;color:var(--text-dim)">confidence: ${confVal.toFixed(4)}</span>`;
-    }
-
-    // Update sidebar score bars
-    const s = data.scores || {};
-    const clipConfigured = s.configured || [];
-    for (const key of ['template', 'text', 'color', 'brightness', 'fade', 'scene_change']) {
-      const val = s[key] || 0;
-      const el = document.getElementById('s-' + key);
-      const bar = document.getElementById('b-' + key);
-      const barParent = bar ? bar.closest('.score-bar') : null;
-      const isConfigured = key === 'scene_change' || clipConfigured.length === 0 || clipConfigured.includes(key);
-      if (barParent) barParent.classList.toggle('unconfigured', !isConfigured);
-      if (el) el.textContent = isConfigured ? val.toFixed(4) : '(not configured)';
-      if (bar) bar.style.width = isConfigured ? (val * 100) + '%' : '0%';
-    }
-    const conf = s.confidence || 0;
-    document.getElementById('s-confidence').textContent = conf.toFixed(4);
-    document.getElementById('b-confidence').style.width = (conf * 100) + '%';
-
-    // Show scores in clip result panel
-    const scoresEl = document.getElementById('clipScores');
-    scoresEl.innerHTML = Object.entries(s)
-      .filter(([k]) => k !== 'configured')
-      .map(([k, v]) => {
-        const isConf = k === 'scene_change' || k === 'confidence' || clipConfigured.length === 0 || clipConfigured.includes(k);
-        const dimStyle = isConf ? 'color:var(--text-dim)' : 'color:#555';
-        const valText = isConf ? v.toFixed(4) : '(not configured)';
-        const valStyle = isConf ? 'font-weight:600;font-variant-numeric:tabular-nums' : 'color:#555;font-size:11px';
-        return `<div style="display:flex;justify-content:space-between;font-size:12px;padding:2px 0">
-          <span style="${dimStyle}">${k}</span>
-          <span style="${valStyle}">${valText}</span>
-        </div>`;
-      }).join('');
-
-    // Populate debug gallery
-    debugImageData = data.debug_images || {};
-    const tabsEl = document.getElementById('debugTabs');
-    tabsEl.innerHTML = '';
-    let firstKey = null;
-    for (const {key, label} of DEBUG_TAB_ORDER) {
-      if (!(key in debugImageData)) continue;
-      if (!firstKey) firstKey = key;
-      const dbtn = document.createElement('button');
-      dbtn.className = 'debug-tab';
-      dbtn.dataset.key = key;
-      dbtn.textContent = label;
-      dbtn.onclick = () => showDebugImage(key);
-      tabsEl.appendChild(dbtn);
-    }
-    if (firstKey) {
-      document.getElementById('placeholder').style.display = 'none';
-      document.getElementById('videoFeed').style.display = 'none';
-      document.getElementById('debugGallery').style.display = 'flex';
-      showDebugImage(firstKey);
-    }
-
-    // Draw timeline chart
-    drawTimeline(data.timeline || [], data.best_frame_time, parseFloat(document.getElementById('thresholdSlider').value));
-
-  } catch (e) {
-    statusEl.textContent = 'Error: ' + e.message;
-  } finally {
-    btn.disabled = false;
-    btn.textContent = 'Analyze Clip';
-  }
+    listEl.innerHTML = clips.map(c => {
+      const date = new Date(c.timestamp * 1000);
+      const timeStr = date.toLocaleTimeString();
+      return `<div class="clip-entry" onclick="playClip('${escapeHtml(c.url)}')">
+        <div class="clip-num">${c.death_number}</div>
+        <div class="clip-info">
+          Death #${c.death_number}
+          <div class="clip-size">${timeStr} &middot; ${c.size_mb} MB</div>
+        </div>
+      </div>`;
+    }).join('');
+  } catch (e) { /* ignore */ }
 }
 
-function drawTimeline(timeline, bestTime, threshold) {
-  const canvas = document.getElementById('clipTimeline');
-  if (!timeline.length) { canvas.style.display = 'none'; return; }
-  canvas.style.display = 'block';
-
-  // Use high-DPI rendering
-  const dpr = window.devicePixelRatio || 1;
-  const displayW = canvas.clientWidth || 360;
-  const displayH = 100;
-  canvas.width = displayW * dpr;
-  canvas.height = displayH * dpr;
-  canvas.style.height = displayH + 'px';
-
-  const ctx = canvas.getContext('2d');
-  ctx.scale(dpr, dpr);
-
-  const pad = {top: 14, right: 12, bottom: 22, left: 32};
-  const w = displayW - pad.left - pad.right;
-  const h = displayH - pad.top - pad.bottom;
-
-  const maxTime = timeline[timeline.length - 1].time_sec || 1;
-
-  // Clear
-  ctx.clearRect(0, 0, displayW, displayH);
-
-  // Background
-  ctx.fillStyle = '#1f1f23';
-  ctx.fillRect(0, 0, displayW, displayH);
-
-  // Threshold line
-  const threshY = pad.top + h * (1 - threshold);
-  ctx.strokeStyle = '#ffc107';
-  ctx.lineWidth = 1;
-  ctx.setLineDash([4, 3]);
-  ctx.beginPath();
-  ctx.moveTo(pad.left, threshY);
-  ctx.lineTo(pad.left + w, threshY);
-  ctx.stroke();
-  ctx.setLineDash([]);
-
-  // Threshold label
-  ctx.fillStyle = '#ffc107';
-  ctx.font = '9px sans-serif';
-  ctx.textAlign = 'left';
-  ctx.fillText(threshold.toFixed(2), pad.left + 2, threshY - 3);
-
-  // Draw confidence line
-  ctx.strokeStyle = '#9147ff';
-  ctx.lineWidth = 2;
-  ctx.beginPath();
-  let peakX = 0, peakY = 0;
-  for (let i = 0; i < timeline.length; i++) {
-    const x = pad.left + (timeline[i].time_sec / maxTime) * w;
-    const y = pad.top + h * (1 - timeline[i].confidence);
-    if (i === 0) ctx.moveTo(x, y);
-    else ctx.lineTo(x, y);
-    if (timeline[i].time_sec === bestTime || Math.abs(timeline[i].time_sec - bestTime) < 0.01) {
-      peakX = x;
-      peakY = y;
-    }
-  }
-  ctx.stroke();
-
-  // Fill area under the line
-  if (timeline.length > 1) {
-    ctx.lineTo(pad.left + (timeline[timeline.length - 1].time_sec / maxTime) * w, pad.top + h);
-    ctx.lineTo(pad.left + (timeline[0].time_sec / maxTime) * w, pad.top + h);
-    ctx.closePath();
-    ctx.fillStyle = 'rgba(145, 71, 255, 0.15)';
-    ctx.fill();
-  }
-
-  // Peak marker
-  if (peakX > 0) {
-    ctx.fillStyle = '#ff4444';
-    ctx.beginPath();
-    ctx.arc(peakX, peakY, 4, 0, Math.PI * 2);
-    ctx.fill();
-
-    ctx.fillStyle = '#ff4444';
-    ctx.font = 'bold 9px sans-serif';
-    ctx.textAlign = 'center';
-    ctx.fillText('Death at ' + bestTime.toFixed(1) + 's', peakX, peakY - 8);
-  }
-
-  // X-axis labels
-  ctx.fillStyle = '#adadb8';
-  ctx.font = '9px sans-serif';
-  ctx.textAlign = 'center';
-  const xTicks = 5;
-  for (let i = 0; i <= xTicks; i++) {
-    const t = (maxTime / xTicks) * i;
-    const x = pad.left + (t / maxTime) * w;
-    ctx.fillText(t.toFixed(1) + 's', x, displayH - 4);
-  }
-
-  // Y-axis labels
-  ctx.textAlign = 'right';
-  ctx.fillText('1.0', pad.left - 4, pad.top + 4);
-  ctx.fillText('0.0', pad.left - 4, pad.top + h + 4);
+function playClip(url) {
+  const player = document.getElementById('clipPlayer');
+  const video = document.getElementById('clipVideo');
+  player.style.display = 'block';
+  video.src = url;
+  video.play();
 }
-
-// Drag and drop
-const uploadZone = document.getElementById('uploadZone');
-uploadZone.addEventListener('dragover', e => { e.preventDefault(); uploadZone.style.borderColor = 'var(--accent)'; });
-uploadZone.addEventListener('dragleave', () => { uploadZone.style.borderColor = ''; });
-uploadZone.addEventListener('drop', e => {
-  e.preventDefault();
-  uploadZone.style.borderColor = '';
-  const fileInput = document.getElementById('fileInput');
-  fileInput.files = e.dataTransfer.files;
-  analyzeImage(fileInput);
-});
 </script>
 
 </body>

@@ -12,6 +12,7 @@ Video is streamed as JPEG frames via WebSocket for low-latency ~30fps playback,
 while detection runs asynchronously at whatever rate the detector can manage.
 """
 
+import asyncio
 import base64
 import json
 import logging
@@ -32,6 +33,8 @@ from dotenv import load_dotenv
 # Ensure project root is on the path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
+from bot.twitch_bot import DeathBot
+from detection.clip_recorder import ClipRecorder
 from detection.counter import DeathCounter
 from detection.detector import DeathDetector
 from detection.stream_capture import StreamCapture
@@ -82,6 +85,13 @@ state = {
         "text_boxes": [],
         "configured": [],
     },
+    # Bot control panel state
+    "clip_recorder": None,      # ClipRecorder instance
+    "bot": None,                # DeathBot instance
+    "bot_loop": None,           # asyncio event loop for bot thread
+    "bot_thread": None,         # threading.Thread running bot
+    "messages_enabled": True,   # toggle for death announcements
+    "channel": "",              # active channel name
 }
 state_lock = threading.Lock()
 stop_event = threading.Event()
@@ -303,6 +313,21 @@ def _detection_thread():
                     "confidence": round(confidence, 3),
                 })
 
+                # Clip recording
+                clip_recorder = state.get("clip_recorder")
+                if clip_recorder:
+                    clip_recorder.on_death(session_count)
+
+                # Bot death announcement
+                if state.get("messages_enabled", False):
+                    bot = state.get("bot")
+                    bot_loop = state.get("bot_loop")
+                    if bot and bot_loop and bot_loop.is_running():
+                        asyncio.run_coroutine_threadsafe(
+                            bot.announce_death(session_count, counter.total_deaths),
+                            bot_loop,
+                        )
+
     logger.info("Detection thread stopped")
 
 
@@ -345,6 +370,12 @@ def _video_thread():
         fh, fw = frame.shape[:2]
         if fw != target_w or fh != target_h:
             frame = cv2.resize(frame, (target_w, target_h))
+
+        # Feed raw frame to clip recorder (before overlays)
+        with state_lock:
+            clip_rec = state.get("clip_recorder")
+        if clip_rec:
+            clip_rec.feed_frame(frame)
 
         # Draw overlays using cached detection results
         display = _draw_overlays(frame, overlay, detector)
@@ -921,9 +952,265 @@ def _stop_capture() -> dict:
         state["detector"] = None
         state["running"] = False
         state["latest_frame_jpg"] = None
+        # Clear bot state if any (test page doesn't start a bot, but be safe)
+        state["clip_recorder"] = None
+        state["channel"] = ""
     time.sleep(0.5)
     stop_event.clear()
     return summary
+
+
+def _start_bot_thread(token: str, channel: str, counter: DeathCounter,
+                      game: str, clip_recorder: ClipRecorder | None):
+    """Create DeathBot and run it in a background thread with its own event loop."""
+    loop = asyncio.new_event_loop()
+    bot = DeathBot(
+        token=token,
+        prefix="!",
+        channel=channel,
+        counter=counter,
+        game=game,
+        clip_recorder=clip_recorder,
+    )
+
+    def _run():
+        asyncio.set_event_loop(loop)
+        try:
+            loop.run_until_complete(bot.start())
+        except Exception:
+            logger.exception("Bot event loop error")
+        finally:
+            loop.close()
+
+    thread = threading.Thread(target=_run, daemon=True)
+    thread.start()
+    return bot, loop, thread
+
+
+def _stop_bot_capture() -> dict:
+    """Stop everything: capture, clip recorder, bot, clear all state."""
+    stop_event.set()
+    summary = {}
+
+    with state_lock:
+        # Stop stream capture
+        if state["capture"]:
+            state["capture"].stop()
+            state["capture"] = None
+
+        # Flush clip recorder
+        clip_rec = state.get("clip_recorder")
+        if clip_rec:
+            clip_rec.flush()
+            state["clip_recorder"] = None
+
+        # End counter session
+        if state["counter"]:
+            summary = state["counter"].end_session()
+
+        state["detector"] = None
+        state["running"] = False
+        state["latest_frame_jpg"] = None
+        state["channel"] = ""
+
+        # Close DeathBot
+        bot = state.get("bot")
+        bot_loop = state.get("bot_loop")
+
+    # Close bot outside state_lock to avoid deadlocks
+    if bot and bot_loop and bot_loop.is_running():
+        try:
+            future = asyncio.run_coroutine_threadsafe(bot.close(), bot_loop)
+            future.result(timeout=5)
+        except Exception:
+            logger.warning("Bot close timed out or errored")
+
+    with state_lock:
+        state["bot"] = None
+        state["bot_loop"] = None
+        state["bot_thread"] = None
+
+    time.sleep(0.5)
+    stop_event.clear()
+    return summary
+
+
+# ---------------------------------------------------------------------------
+# Bot control panel routes
+# ---------------------------------------------------------------------------
+
+CLIPS_DIR = PROJECT_ROOT / "clips"
+
+
+@app.route("/bot")
+def bot_page():
+    return render_template("bot.html", profiles=list_profiles())
+
+
+@app.route("/api/bot/start", methods=["POST"])
+def api_bot_start():
+    """Start stream + detection + clips + optional chat bot."""
+    data = request.json or {}
+    channel = data.get("channel", "").strip()
+    profile_name = data.get("profile", "generic")
+    threshold = float(data.get("threshold", 0.80))
+    cooldown = int(data.get("cooldown", 15))
+    quality = data.get("quality", "720p")
+    target_fps = int(data.get("target_fps", 15))
+    twitch_token = data.get("twitch_token", "").strip() or os.getenv("TWITCH_TOKEN", "")
+
+    if not channel:
+        return jsonify({"error": "Channel name is required"}), 400
+
+    if profile_name not in PROFILES:
+        return jsonify({"error": f"Unknown profile: {profile_name}"}), 400
+
+    # Stop any running session (test or bot)
+    _stop_bot_capture()
+
+    profile = get_profile(profile_name)
+    detector = DeathDetector(profile=profile, threshold=threshold, cooldown=cooldown)
+    capture = StreamCapture(channel=channel, quality=quality, target_fps=target_fps)
+
+    if not capture.start():
+        error = capture.last_error or f"Could not connect to {channel}. Is the stream live?"
+        return jsonify({"error": error}), 502
+
+    counter = DeathCounter()
+    counter.start_session(profile_name)
+
+    # Initialize clip recorder
+    clip_recorder = ClipRecorder(enabled=True, output_dir=CLIPS_DIR)
+
+    with state_lock:
+        state["detector"] = detector
+        state["capture"] = capture
+        state["counter"] = counter
+        state["game"] = profile_name
+        state["profile_name"] = profile_name
+        state["threshold"] = threshold
+        state["cooldown"] = cooldown
+        state["running"] = True
+        state["death_log"] = []
+        state["frame_count"] = 0
+        state["channel"] = channel
+        state["clip_recorder"] = clip_recorder
+        state["messages_enabled"] = bool(twitch_token)
+        state["overlay_state"] = {
+            "scores": {},
+            "confidence": 0.0,
+            "is_death": False,
+            "death_flash_until": 0.0,
+            "match_loc": None,
+            "text_boxes": [],
+            "configured": [],
+        }
+
+    stop_event.clear()
+
+    # Start detection thread
+    td = threading.Thread(target=_detection_thread, daemon=True)
+    td.start()
+
+    # Start video thread
+    tv = threading.Thread(target=_video_thread, daemon=True)
+    tv.start()
+
+    # Start bot if token provided
+    bot_connected = False
+    if twitch_token:
+        bot, bot_loop, bot_thread = _start_bot_thread(
+            twitch_token, channel, counter, profile.display_name, clip_recorder,
+        )
+        with state_lock:
+            state["bot"] = bot
+            state["bot_loop"] = bot_loop
+            state["bot_thread"] = bot_thread
+        bot_connected = True
+
+    return jsonify({
+        "status": "started",
+        "channel": channel,
+        "profile": profile_name,
+        "templates_loaded": len(detector.templates),
+        "bot_connected": bot_connected,
+    })
+
+
+@app.route("/api/bot/stop", methods=["POST"])
+def api_bot_stop():
+    """Stop the bot session (capture + clips + bot)."""
+    summary = _stop_bot_capture()
+    return jsonify({"status": "stopped", "summary": summary})
+
+
+@app.route("/api/bot/status")
+def api_bot_status():
+    """Return bot status: same as /api/status + bot-specific fields."""
+    with state_lock:
+        templates_loaded = len(state["detector"].templates) if state["detector"] else 0
+        clip_rec = state.get("clip_recorder")
+        clip_count = clip_rec.get_clip_count() if clip_rec else 0
+        bot = state.get("bot")
+        bot_loop = state.get("bot_loop")
+        bot_connected = bool(bot and bot_loop and bot_loop.is_running())
+        return jsonify({
+            "running": state["running"],
+            "profile": state["profile_name"],
+            "threshold": state["threshold"],
+            "scores": state["latest_scores"],
+            "confidence": state["latest_confidence"],
+            "session_deaths": state["counter"].session_deaths,
+            "total_deaths": state["counter"].total_deaths,
+            "death_log": state["death_log"][-50:],
+            "frame_count": state["frame_count"],
+            "templates_loaded": templates_loaded,
+            "messages_enabled": state.get("messages_enabled", False),
+            "bot_connected": bot_connected,
+            "clip_count": clip_count,
+            "channel": state.get("channel", ""),
+        })
+
+
+@app.route("/api/bot/messages", methods=["POST"])
+def api_bot_messages():
+    """Toggle death announcements."""
+    data = request.json or {}
+    enabled = bool(data.get("enabled", True))
+    with state_lock:
+        state["messages_enabled"] = enabled
+    return jsonify({"messages_enabled": enabled})
+
+
+@app.route("/api/bot/clips")
+def api_bot_clips():
+    """List saved clips sorted newest first."""
+    if not CLIPS_DIR.exists():
+        return jsonify([])
+
+    clips = []
+    for f in sorted(CLIPS_DIR.glob("death_*.mp4"), reverse=True):
+        # Parse death number from filename: death_0001_20260210_143022.mp4
+        parts = f.stem.split("_")
+        death_number = int(parts[1]) if len(parts) >= 2 else 0
+        size_mb = round(f.stat().st_size / (1024 * 1024), 2)
+        clips.append({
+            "filename": f.name,
+            "death_number": death_number,
+            "timestamp": f.stat().st_mtime,
+            "size_mb": size_mb,
+            "url": f"/api/bot/clips/{f.name}",
+        })
+
+    return jsonify(clips)
+
+
+@app.route("/api/bot/clips/<filename>")
+def api_bot_clip_file(filename):
+    """Serve a clip MP4 file."""
+    if not CLIPS_DIR.exists():
+        return jsonify({"error": "No clips directory"}), 404
+    return send_from_directory(str(CLIPS_DIR), filename)
 
 
 # ---------------------------------------------------------------------------
