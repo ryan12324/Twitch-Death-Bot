@@ -50,5 +50,6 @@
   },
   "max_brightness": 50,
   "min_brightness": null,
-  "cooldown_override": null
+  "cooldown_override": null,
+  "text_indicators": ["YOU DIED", "DEATH", "GAME OVER", "WASTED"]
 }

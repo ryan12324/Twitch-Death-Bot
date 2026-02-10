@@ -795,6 +795,24 @@
         </div>
       </div>
 
+      <!-- Text Indicators -->
+      <div class="section">
+        <div class="section-head" onclick="toggleSection(this)">
+          <h3>Text Indicators</h3>
+          <span class="chevron">&#9660;</span>
+        </div>
+        <div class="section-body">
+          <p style="font-size:12px;color:var(--text-muted);margin-bottom:10px">
+            Text strings to detect via OCR (e.g. "YOU DIED"). Case-insensitive matching.
+          </p>
+          <div style="display:flex;gap:6px;margin-bottom:10px">
+            <input type="text" id="textIndicatorInput" placeholder="e.g. YOU DIED" onkeydown="if(event.key==='Enter')addTextIndicator()" style="flex:1;background:var(--bg);border:1px solid var(--border);border-radius:6px;padding:8px 12px;color:var(--text);font-family:'JetBrains Mono',monospace;font-size:13px;outline:none">
+            <button class="btn btn-secondary" onclick="addTextIndicator()" style="width:auto;padding:8px 16px">Add</button>
+          </div>
+          <div id="textIndicatorsList"></div>
+        </div>
+      </div>
+
       <!-- Brightness -->
       <div class="section">
         <div class="section-head" onclick="toggleSection(this)">
@@ -890,6 +908,7 @@ let canvasImageFile = null;   // raw File for test uploads
 let regions = [];             // [{x_min, y_min, x_max, y_max}]
 let dominantColors = [];      // [{lower:[b,g,r], upper:[b,g,r]}]
 let fadeColor = null;         // {lower:[b,g,r], upper:[b,g,r]} | null
+let textIndicators = [];      // ["YOU DIED", "DEATH", ...]
 let sampledRGB = null;        // {r,g,b} last sampled pixel
 let isDrawing = false;
 let drawStart = null;
@@ -939,6 +958,7 @@ function selectProfile(name) {
   regions = (p.screen_regions || []).map(r => ({...r}));
   dominantColors = (p.dominant_colors || []).map(c => ({lower: [...c.lower], upper: [...c.upper]}));
   fadeColor = p.fade_to_color ? {lower: [...p.fade_to_color.lower], upper: [...p.fade_to_color.upper]} : null;
+  textIndicators = (p.text_indicators || []).slice();
 
   // Brightness
   const maxB = p.max_brightness;
@@ -961,6 +981,7 @@ function selectProfile(name) {
   renderRegions();
   renderColors();
   renderFadeColor();
+  renderTextIndicators();
   updateBrightnessUI();
   loadTemplateList();
   redrawOverlay();
@@ -980,6 +1001,7 @@ function newProfile() {
   regions = [];
   dominantColors = [];
   fadeColor = null;
+  textIndicators = [];
   canvasImage = null;
   canvasImageFile = null;
   meanBrightness = null;
@@ -999,6 +1021,7 @@ function newProfile() {
   renderRegions();
   renderColors();
   renderFadeColor();
+  renderTextIndicators();
   updateBrightnessUI();
 
   document.getElementById('fName').focus();
@@ -1294,6 +1317,39 @@ function clearFadeColor() {
   renderFadeColor();
 }
 
+// ── Text Indicators ──
+function renderTextIndicators() {
+  const el = document.getElementById('textIndicatorsList');
+  if (textIndicators.length === 0) {
+    el.innerHTML = '<div class="empty-list">No text indicators defined.</div>';
+    return;
+  }
+  el.innerHTML = textIndicators.map((t, i) =>
+    `<div class="list-item">
+      <span style="color:var(--yellow);font-size:13px;font-weight:600">"${t}"</span>
+      <button class="remove-btn" onclick="removeTextIndicator(${i})">&times;</button>
+    </div>`
+  ).join('');
+}
+
+function addTextIndicator() {
+  const input = document.getElementById('textIndicatorInput');
+  const val = input.value.trim();
+  if (!val) return;
+  if (textIndicators.some(t => t.toLowerCase() === val.toLowerCase())) {
+    showToast('Indicator already exists', 'error');
+    return;
+  }
+  textIndicators.push(val);
+  input.value = '';
+  renderTextIndicators();
+}
+
+function removeTextIndicator(i) {
+  textIndicators.splice(i, 1);
+  renderTextIndicators();
+}
+
 // ═══════════════════════════════════════════════════════════════
 // BRIGHTNESS
 // ═══════════════════════════════════════════════════════════════
@@ -1388,6 +1444,7 @@ function buildProfileData() {
     screen_regions: regions,
     dominant_colors: dominantColors,
     fade_to_color: fadeColor,
+    text_indicators: textIndicators,
     max_brightness: maxOn ? parseInt(document.getElementById('maxBrightSlider').value) : null,
     min_brightness: minOn ? parseInt(document.getElementById('minBrightSlider').value) : null,
     cooldown_override: cooldown ? parseInt(cooldown) : null,
@@ -1441,6 +1498,7 @@ const DEBUG_TAB_ORDER = [
   {key: 'original', label: 'Original'},
   {key: 'template_match', label: 'Template'},
   {key: 'edge_detection', label: 'Edges'},
+  {key: 'text_detection', label: 'Text'},
   {key: 'color_mask', label: 'Color'},
   {key: 'brightness', label: 'Brightness'},
   {key: 'fade_mask', label: 'Fade'},

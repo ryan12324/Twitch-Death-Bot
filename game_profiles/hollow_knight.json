@@ -38,5 +38,6 @@
   },
   "max_brightness": 35,
   "min_brightness": null,
-  "cooldown_override": 10
+  "cooldown_override": 10,
+  "text_indicators": []
 }

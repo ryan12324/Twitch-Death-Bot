@@ -249,32 +249,64 @@ class DeathDetector:
         return best_score
 
     def _color_analysis_score(self, frame: np.ndarray) -> float:
-        """Score based on how much of the frame matches death screen colors."""
+        """Score based on how much of the frame matches death screen colors.
+
+        When screen_regions are defined, color analysis is restricted to those
+        regions so that HUD elements and other non-death-screen areas don't
+        pollute the score.
+        """
         if not self.profile.dominant_colors:
             logger.info("color_analysis: no dominant_colors in profile, returning 0.0")
             return 0.0
 
-        total_pixels = frame.shape[0] * frame.shape[1]
+        # Build list of areas to analyze
+        if self.profile.screen_regions:
+            areas = [self._extract_region(frame, r) for r in self.profile.screen_regions]
+            logger.info("color_analysis: using %d screen region(s)", len(areas))
+        else:
+            areas = [frame]
+            logger.info("color_analysis: no regions, using full frame")
+
         max_ratio = 0.0
 
         for i, color_range in enumerate(self.profile.dominant_colors):
             lower = np.array(color_range.lower, dtype=np.uint8)
             upper = np.array(color_range.upper, dtype=np.uint8)
-            mask = cv2.inRange(frame, lower, upper)
-            ratio = np.count_nonzero(mask) / total_pixels
-            logger.info(
-                "color_analysis: range[%d] BGR(%s)-(%s) -> ratio=%.4f",
-                i, color_range.lower, color_range.upper, ratio,
-            )
-            max_ratio = max(max_ratio, ratio)
+            for area in areas:
+                total_pixels = area.shape[0] * area.shape[1]
+                mask = cv2.inRange(area, lower, upper)
+                ratio = np.count_nonzero(mask) / total_pixels
+                logger.info(
+                    "color_analysis: range[%d] BGR(%s)-(%s) area=%dx%d -> ratio=%.4f",
+                    i, color_range.lower, color_range.upper,
+                    area.shape[1], area.shape[0], ratio,
+                )
+                max_ratio = max(max_ratio, ratio)
 
         logger.info("color_analysis: final score=%.4f", max_ratio)
         return max_ratio
 
     def _brightness_score(self, frame: np.ndarray) -> float:
-        """Score based on overall brightness matching death screen profile."""
-        gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-        mean_brightness = np.mean(gray)
+        """Score based on overall brightness matching death screen profile.
+
+        When screen_regions are defined, computes the mean brightness across
+        all region crops (averaged) rather than the full frame.
+        """
+        if self.profile.screen_regions:
+            brightness_values = []
+            for region in self.profile.screen_regions:
+                crop = self._extract_region(frame, region)
+                crop_gray = cv2.cvtColor(crop, cv2.COLOR_BGR2GRAY)
+                brightness_values.append(np.mean(crop_gray))
+            mean_brightness = float(np.mean(brightness_values))
+            logger.info(
+                "brightness: using %d region(s), per-region means=%s",
+                len(brightness_values),
+                [f"{v:.1f}" for v in brightness_values],
+            )
+        else:
+            gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+            mean_brightness = np.mean(gray)
 
         score = 0.0
 
@@ -360,6 +392,55 @@ class DeathDetector:
         logger.info("scene_change: mean_diff=%.1f -> score=%.4f", mean_diff, score)
         return score
 
+    def _text_detection_score(self, frame: np.ndarray) -> float:
+        """Score based on OCR text matching against text_indicators.
+
+        Uses EasyOCR to detect text in the frame (cropped to screen_regions
+        when defined). Returns the max OCR confidence for any indicator match.
+        """
+        if not self.profile.text_indicators:
+            logger.info("text_detection: no text_indicators in profile, returning 0.0")
+            return 0.0
+
+        # Lazy-init EasyOCR reader
+        if not hasattr(self, '_ocr_reader') or self._ocr_reader is None:
+            try:
+                import easyocr
+                self._ocr_reader = easyocr.Reader(['en'], gpu=False, verbose=False)
+                logger.info("text_detection: EasyOCR reader initialized")
+            except ImportError:
+                logger.warning("text_detection: easyocr not installed, returning 0.0")
+                return 0.0
+
+        # Build list of areas to scan
+        if self.profile.screen_regions:
+            areas = [self._extract_region(frame, r) for r in self.profile.screen_regions]
+        else:
+            areas = [frame]
+
+        indicators_lower = [t.lower() for t in self.profile.text_indicators]
+        best_score = 0.0
+
+        for area in areas:
+            try:
+                results = self._ocr_reader.readtext(area)
+            except Exception as e:
+                logger.warning("text_detection: OCR failed: %s", e)
+                continue
+
+            for bbox, text, confidence in results:
+                text_lower = text.lower()
+                matched = any(ind in text_lower for ind in indicators_lower)
+                logger.info(
+                    "text_detection: detected '%s' confidence=%.4f matched=%s",
+                    text, confidence, matched,
+                )
+                if matched:
+                    best_score = max(best_score, confidence)
+
+        logger.info("text_detection: final score=%.4f", best_score)
+        return best_score
+
     @staticmethod
     def _normalize_frame(frame: np.ndarray) -> np.ndarray:
         """Scale frame to fit within working resolution, preserving aspect ratio.
@@ -408,13 +489,24 @@ class DeathDetector:
         brightness_score = self._brightness_score(frame)
         fade_score = self._fade_detection_score(frame)
         scene_change = self._scene_change_score(frame)
+        text_score = self._text_detection_score(frame)
 
         # Compute base confidence from persistent signals (things that stay
         # true for every frame of a death screen, not just the transition).
-        if self.templates and template_score > 0.75:
+        if text_score > 0.7:
+            weight_tier = "STRONG_TEXT"
+            confidence = (
+                text_score * 0.55
+                + template_score * 0.20
+                + color_score * 0.10
+                + brightness_score * 0.05
+                + fade_score * 0.10
+            )
+        elif self.templates and template_score > 0.75:
             weight_tier = "STRONG_TEMPLATE"
             confidence = (
-                template_score * 0.65
+                template_score * 0.55
+                + text_score * 0.10
                 + color_score * 0.10
                 + brightness_score * 0.10
                 + fade_score * 0.15
@@ -422,22 +514,24 @@ class DeathDetector:
         elif self.templates and template_score > 0.40:
             weight_tier = "MODERATE_TEMPLATE"
             confidence = (
-                template_score * 0.40
-                + color_score * 0.20
-                + brightness_score * 0.15
+                template_score * 0.35
+                + text_score * 0.15
+                + color_score * 0.15
+                + brightness_score * 0.10
                 + fade_score * 0.25
             )
         else:
             weight_tier = "VISUAL_ONLY"
             confidence = (
-                color_score * 0.35
-                + brightness_score * 0.30
-                + fade_score * 0.35
+                text_score * 0.15
+                + color_score * 0.30
+                + brightness_score * 0.25
+                + fade_score * 0.30
             )
 
         logger.info(
-            "weighting: tier=%s templates_loaded=%d template_score=%.4f",
-            weight_tier, len(self.templates), template_score,
+            "weighting: tier=%s templates_loaded=%d template_score=%.4f text_score=%.4f",
+            weight_tier, len(self.templates), template_score, text_score,
         )
 
         # Scene change is a bonus for transitions, never a penalty.
@@ -454,6 +548,7 @@ class DeathDetector:
         # Store individual scores for the web GUI
         self.last_scores = {
             "template": round(template_score, 4),
+            "text": round(text_score, 4),
             "color": round(color_score, 4),
             "brightness": round(brightness_score, 4),
             "fade": round(fade_score, 4),
@@ -474,20 +569,21 @@ class DeathDetector:
         logger.info(
             "=== analyze_frame END === confidence=%.4f threshold=%.2f "
             "consecutive=%d/%d is_death=%s | "
-            "template=%.4f color=%.4f brightness=%.4f fade=%.4f scene=%.4f",
+            "template=%.4f text=%.4f color=%.4f brightness=%.4f fade=%.4f scene=%.4f",
             confidence, self.threshold,
             self.death_frame_count, self.required_consecutive, is_death,
-            template_score, color_score, brightness_score, fade_score, scene_change,
+            template_score, text_score, color_score, brightness_score, fade_score, scene_change,
         )
 
         if is_death:
             self.last_detection_time = now
             self.death_frame_count = 0
             logger.info(
-                "DEATH DETECTED! Confidence: %.2f (template=%.2f, color=%.2f, "
+                "DEATH DETECTED! Confidence: %.2f (template=%.2f, text=%.2f, color=%.2f, "
                 "brightness=%.2f, fade=%.2f, scene_change=%.2f)",
                 confidence,
                 template_score,
+                text_score,
                 color_score,
                 brightness_score,
                 fade_score,
@@ -527,6 +623,8 @@ class DeathDetector:
         fade_img = self._debug_fade_mask(frame)
         if fade_img is not None:
             debug_images["fade_mask"] = fade_img
+
+        debug_images["text_detection"] = self._debug_text_detection(frame)
 
         return is_death, confidence, debug_images
 
@@ -624,7 +722,11 @@ class DeathDetector:
         return vis, edge_bgr
 
     def _debug_color_mask(self, frame: np.ndarray) -> np.ndarray:
-        """Visualize dominant color mask overlay."""
+        """Visualize dominant color mask overlay.
+
+        When screen_regions are defined, only highlights color matches within
+        those regions and draws region outlines on the visualization.
+        """
         h, w = frame.shape[:2]
 
         if not self.profile.dominant_colors:
@@ -635,13 +737,29 @@ class DeathDetector:
             )
             return vis
 
-        # Build combined mask from all color ranges
+        # Build combined mask restricted to screen regions
         combined_mask = np.zeros((h, w), dtype=np.uint8)
-        for color_range in self.profile.dominant_colors:
-            lower = np.array(color_range.lower, dtype=np.uint8)
-            upper = np.array(color_range.upper, dtype=np.uint8)
-            mask = cv2.inRange(frame, lower, upper)
-            combined_mask = cv2.bitwise_or(combined_mask, mask)
+
+        if self.profile.screen_regions:
+            for region in self.profile.screen_regions:
+                x1 = int(region.x_min * w)
+                y1 = int(region.y_min * h)
+                x2 = int(region.x_max * w)
+                y2 = int(region.y_max * h)
+                crop = frame[y1:y2, x1:x2]
+                for color_range in self.profile.dominant_colors:
+                    lower = np.array(color_range.lower, dtype=np.uint8)
+                    upper = np.array(color_range.upper, dtype=np.uint8)
+                    region_mask = cv2.inRange(crop, lower, upper)
+                    combined_mask[y1:y2, x1:x2] = cv2.bitwise_or(
+                        combined_mask[y1:y2, x1:x2], region_mask
+                    )
+        else:
+            for color_range in self.profile.dominant_colors:
+                lower = np.array(color_range.lower, dtype=np.uint8)
+                upper = np.array(color_range.upper, dtype=np.uint8)
+                mask = cv2.inRange(frame, lower, upper)
+                combined_mask = cv2.bitwise_or(combined_mask, mask)
 
         # Dimmed base at 30%
         vis = (frame * 0.3).astype(np.uint8)
@@ -651,11 +769,30 @@ class DeathDetector:
         mask_3ch = cv2.merge([combined_mask, combined_mask, combined_mask])
         vis = np.where(mask_3ch > 0, cv2.addWeighted(frame, 0.6, green_tint, 0.4, 0), vis)
 
-        # Show match percentage
-        total_pixels = h * w
+        # Draw region outlines
+        if self.profile.screen_regions:
+            for region in self.profile.screen_regions:
+                x1 = int(region.x_min * w)
+                y1 = int(region.y_min * h)
+                x2 = int(region.x_max * w)
+                y2 = int(region.y_max * h)
+                cv2.rectangle(vis, (x1, y1), (x2, y2), (200, 200, 0), 2)
+
+        # Show match percentage (against region area if regions defined)
+        if self.profile.screen_regions:
+            region_pixels = sum(
+                int((r.x_max - r.x_min) * w) * int((r.y_max - r.y_min) * h)
+                for r in self.profile.screen_regions
+            )
+            total_pixels = max(region_pixels, 1)
+        else:
+            total_pixels = h * w
         match_pct = np.count_nonzero(combined_mask) / total_pixels * 100
+        label = f"Color match: {match_pct:.1f}%"
+        if self.profile.screen_regions:
+            label += " (within regions)"
         cv2.putText(
-            vis, f"Color match: {match_pct:.1f}%", (10, 30),
+            vis, label, (10, 30),
             cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 0), 2,
         )
         return vis
@@ -735,4 +872,69 @@ class DeathDetector:
             vis, "Threshold: 85%", (10, 60),
             cv2.FONT_HERSHEY_SIMPLEX, 0.6, (180, 100, 220), 1,
         )
+        return vis
+
+    def _debug_text_detection(self, frame: np.ndarray) -> np.ndarray:
+        """Visualize OCR text detection with bounding boxes."""
+        vis = frame.copy()
+        h, w = frame.shape[:2]
+
+        if not self.profile.text_indicators:
+            cv2.putText(
+                vis, "No text_indicators in profile", (w // 2 - 180, h // 2),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 200, 200), 2,
+            )
+            return vis
+
+        if not hasattr(self, '_ocr_reader') or self._ocr_reader is None:
+            cv2.putText(
+                vis, "OCR reader not initialized", (w // 2 - 160, h // 2),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 200, 200), 2,
+            )
+            return vis
+
+        indicators_lower = [t.lower() for t in self.profile.text_indicators]
+
+        # Build search areas with their offsets
+        search_areas = []
+        if self.profile.screen_regions:
+            for region in self.profile.screen_regions:
+                x1 = int(region.x_min * w)
+                y1 = int(region.y_min * h)
+                x2 = int(region.x_max * w)
+                y2 = int(region.y_max * h)
+                crop = frame[y1:y2, x1:x2]
+                search_areas.append((crop, x1, y1))
+                # Draw region outline
+                cv2.rectangle(vis, (x1, y1), (x2, y2), (200, 200, 0), 2)
+        else:
+            search_areas.append((frame, 0, 0))
+
+        for area, offset_x, offset_y in search_areas:
+            try:
+                results = self._ocr_reader.readtext(area)
+            except Exception:
+                continue
+
+            for bbox, text, confidence in results:
+                text_lower = text.lower()
+                matched = any(ind in text_lower for ind in indicators_lower)
+
+                # Convert bbox points to frame coordinates
+                pts = np.array(bbox, dtype=np.int32)
+                pts[:, 0] += offset_x
+                pts[:, 1] += offset_y
+
+                color = (0, 255, 0) if matched else (128, 128, 128)
+                thickness = 2 if matched else 1
+                cv2.polylines(vis, [pts], isClosed=True, color=color, thickness=thickness)
+
+                # Label
+                label = f"{text} ({confidence:.2f})"
+                label_pos = (pts[0][0], pts[0][1] - 8)
+                cv2.putText(
+                    vis, label, label_pos,
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 1,
+                )
+
         return vis

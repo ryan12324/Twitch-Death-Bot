@@ -49,6 +49,8 @@ class GameProfile:
     max_brightness: int | None = None
     # Minimum brightness - some death screens flash bright
     min_brightness: int | None = None
+    # Text strings to look for via OCR (e.g. "YOU DIED")
+    text_indicators: list[str] = field(default_factory=list)
 
 
 # ---------------------------------------------------------------------------
@@ -82,6 +84,7 @@ def _parse_profile(data: dict) -> GameProfile:
         max_brightness=data.get("max_brightness"),
         min_brightness=data.get("min_brightness"),
         cooldown_override=data.get("cooldown_override"),
+        text_indicators=data.get("text_indicators", []),
     )
 
 
@@ -103,6 +106,7 @@ def profile_to_dict(profile: GameProfile) -> dict:
         "max_brightness": profile.max_brightness,
         "min_brightness": profile.min_brightness,
         "cooldown_override": profile.cooldown_override,
+        "text_indicators": profile.text_indicators,
     }
 
 

@@ -27,5 +27,6 @@
   "fade_to_color": null,
   "max_brightness": null,
   "min_brightness": 200,
-  "cooldown_override": 3
+  "cooldown_override": 3,
+  "text_indicators": []
 }

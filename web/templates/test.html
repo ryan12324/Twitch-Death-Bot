@@ -218,6 +218,7 @@
     transition: width 0.3s;
   }
   .bar-template .bar-fill { background: #2196f3; }
+  .bar-text .bar-fill { background: #ff8f00; }
   .bar-color .bar-fill { background: #4caf50; }
   .bar-brightness .bar-fill { background: #ff9800; }
   .bar-fade .bar-fill { background: #9c27b0; }
@@ -487,6 +488,7 @@
         <h2>Detection Scores</h2>
         <div id="scoreBars">
           <div class="score-bar bar-template"><div class="bar-header"><span class="name">Template</span><span class="value" id="s-template">0.00</span></div><div class="bar-track"><div class="bar-fill" id="b-template" style="width:0%"></div></div></div>
+          <div class="score-bar bar-text"><div class="bar-header"><span class="name">Text</span><span class="value" id="s-text">0.00</span></div><div class="bar-track"><div class="bar-fill" id="b-text" style="width:0%"></div></div></div>
           <div class="score-bar bar-color"><div class="bar-header"><span class="name">Color</span><span class="value" id="s-color">0.00</span></div><div class="bar-track"><div class="bar-fill" id="b-color" style="width:0%"></div></div></div>
           <div class="score-bar bar-brightness"><div class="bar-header"><span class="name">Brightness</span><span class="value" id="s-brightness">0.00</span></div><div class="bar-track"><div class="bar-fill" id="b-brightness" style="width:0%"></div></div></div>
           <div class="score-bar bar-fade"><div class="bar-header"><span class="name">Fade</span><span class="value" id="s-fade">0.00</span></div><div class="bar-track"><div class="bar-fill" id="b-fade" style="width:0%"></div></div></div>
@@ -620,7 +622,7 @@ async function pollStatus() {
 
     // Update scores
     const scores = data.scores || {};
-    for (const key of ['template', 'color', 'brightness', 'fade', 'scene_change']) {
+    for (const key of ['template', 'text', 'color', 'brightness', 'fade', 'scene_change']) {
       const val = scores[key] || 0;
       const el = document.getElementById('s-' + key);
       const bar = document.getElementById('b-' + key);
@@ -683,6 +685,7 @@ const DEBUG_TAB_ORDER = [
   {key: 'original', label: 'Original'},
   {key: 'template_match', label: 'Template Match'},
   {key: 'edge_detection', label: 'Edge Detection'},
+  {key: 'text_detection', label: 'Text Detection'},
   {key: 'color_mask', label: 'Color Mask'},
   {key: 'brightness', label: 'Brightness'},
   {key: 'fade_mask', label: 'Fade Mask'},
