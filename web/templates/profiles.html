@@ -1340,35 +1340,55 @@ function setTool(tool) {
 function autoDetectColors() {
   if (!canvasImage) { showToast('Upload an image first', 'error'); return; }
 
-  // Downsample for speed
+  // Draw full image to a temp canvas to read pixels
   const c = document.createElement('canvas');
-  const scale = Math.min(1, 200 / canvasImage.naturalWidth);
-  c.width = Math.round(canvasImage.naturalWidth * scale);
-  c.height = Math.round(canvasImage.naturalHeight * scale);
+  const imgW = canvasImage.naturalWidth;
+  const imgH = canvasImage.naturalHeight;
+  c.width = imgW;
+  c.height = imgH;
   const ctx = c.getContext('2d');
-  ctx.drawImage(canvasImage, 0, 0, c.width, c.height);
-  const data = ctx.getImageData(0, 0, c.width, c.height).data;
+  ctx.drawImage(canvasImage, 0, 0);
 
-  // Bin pixels into 8x8x8 color grid
+  // Build list of pixel rectangles to sample (regions or full image)
+  const rects = [];
+  if (regions.length > 0) {
+    for (const r of regions) {
+      rects.push({
+        x: Math.round(r.x_min * imgW),
+        y: Math.round(r.y_min * imgH),
+        w: Math.round((r.x_max - r.x_min) * imgW),
+        h: Math.round((r.y_max - r.y_min) * imgH),
+      });
+    }
+  } else {
+    rects.push({x: 0, y: 0, w: imgW, h: imgH});
+  }
+
+  // Bin pixels from regions into 8x8x8 color grid
   const bins = {};
   let brightestColor = {r: 0, g: 0, b: 0, brightness: 0};
-  const totalPixels = c.width * c.height;
+  let totalPixels = 0;
 
-  for (let i = 0; i < data.length; i += 4) {
-    const r = data[i], g = data[i+1], b = data[i+2];
-    const binR = Math.floor(r / 32) * 32;
-    const binG = Math.floor(g / 32) * 32;
-    const binB = Math.floor(b / 32) * 32;
-    const key = `${binR},${binG},${binB}`;
-    if (!bins[key]) bins[key] = {count: 0, sumR: 0, sumG: 0, sumB: 0};
-    bins[key].count++;
-    bins[key].sumR += r;
-    bins[key].sumG += g;
-    bins[key].sumB += b;
+  for (const rect of rects) {
+    const data = ctx.getImageData(rect.x, rect.y, rect.w, rect.h).data;
+    const pixelCount = rect.w * rect.h;
+    totalPixels += pixelCount;
+    for (let i = 0; i < data.length; i += 4) {
+      const r = data[i], g = data[i+1], b = data[i+2];
+      const binR = Math.floor(r / 32) * 32;
+      const binG = Math.floor(g / 32) * 32;
+      const binB = Math.floor(b / 32) * 32;
+      const key = `${binR},${binG},${binB}`;
+      if (!bins[key]) bins[key] = {count: 0, sumR: 0, sumG: 0, sumB: 0};
+      bins[key].count++;
+      bins[key].sumR += r;
+      bins[key].sumG += g;
+      bins[key].sumB += b;
 
-    const brightness = 0.299 * r + 0.587 * g + 0.114 * b;
-    if (brightness > brightestColor.brightness) {
-      brightestColor = {r, g, b, brightness};
+      const brightness = 0.299 * r + 0.587 * g + 0.114 * b;
+      if (brightness > brightestColor.brightness) {
+        brightestColor = {r, g, b, brightness};
+      }
     }
   }
 
@@ -1389,7 +1409,8 @@ function autoDetectColors() {
   const list = document.getElementById('detectedColorsList');
   container.style.display = 'block';
 
-  let html = '';
+  const source = regions.length > 0 ? `from ${regions.length} region(s)` : 'from full image';
+  let html = `<div style="font-size:10px;color:var(--text-muted);margin-bottom:6px">Sampled ${source}</div>`;
   topColors.forEach((c, i) => {
     html += `<div class="detected-swatch" onclick="addDetectedColor(${c.r},${c.g},${c.b}, 30)" title="Click to add as dominant color">
       <div class="ds-color" style="background:rgb(${c.r},${c.g},${c.b})"></div>
