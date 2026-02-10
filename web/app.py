@@ -136,15 +136,17 @@ def _detection_thread():
 
         # ── Draw color mask highlights (semi-transparent green) ──
         if profile.dominant_colors and "color" in configured:
+            combined_mask = np.zeros((h, w), dtype=np.uint8)
             for cr in profile.dominant_colors:
                 lower = np.array(cr.lower, dtype=np.uint8)
                 upper = np.array(cr.upper, dtype=np.uint8)
-                mask = cv2.inRange(frame, lower, upper)
-                green = np.zeros_like(display)
-                green[:, :, 1] = 100
-                display[mask > 0] = cv2.addWeighted(
-                    display, 0.6, green, 0.4, 0
-                )[mask > 0]
+                combined_mask |= cv2.inRange(frame, lower, upper)
+            idx = combined_mask > 0
+            if np.any(idx):
+                # Add green tint to matching pixels without full-frame alloc
+                pixels = display[idx].astype(np.int16)
+                pixels[:, 1] = np.clip(pixels[:, 1] + 40, 0, 255)
+                display[idx] = pixels.astype(np.uint8)
 
         # ── Draw template match box (if detector tracked it) ──
         if hasattr(detector, '_last_match_loc') and detector._last_match_loc:
@@ -180,7 +182,7 @@ def _detection_thread():
         bar_x = w - 200
         bar_w = 180
         bar_h = 18
-        y_offset = 20
+        y_start = 20
         bar_items = [
             ("template", (180, 120, 0)),
             ("text", (0, 140, 255)),
@@ -189,31 +191,35 @@ def _detection_thread():
             ("fade", (180, 0, 180)),
             ("scene_change", (0, 100, 255)),
         ]
+        conf = scores.get("confidence", 0)
+        threshold = detector.threshold
+
+        # Single ROI-based alpha blend for the entire panel background
+        panel_h = len(bar_items) * (bar_h + 4) + 8 + 24
+        px1 = max(0, bar_x - 4)
+        py1 = max(0, y_start - 4)
+        px2 = min(w, bar_x + bar_w + 4)
+        py2 = min(h, y_start + panel_h + 4)
+        roi = display[py1:py2, px1:px2]
+        dark = np.full_like(roi, (30, 30, 30), dtype=np.uint8)
+        cv2.addWeighted(roi, 0.3, dark, 0.7, 0, roi)
+
+        # Draw bar fills and labels directly (no per-bar frame copies)
+        y_offset = y_start
         for label, color in bar_items:
             score_val = scores.get(label, 0)
             is_conf = label in configured
-            # Semi-transparent background
-            overlay_bg = display.copy()
-            cv2.rectangle(overlay_bg, (bar_x, y_offset), (bar_x + bar_w, y_offset + bar_h), (30, 30, 30), -1)
-            cv2.addWeighted(overlay_bg, 0.7, display, 0.3, 0, display)
-            # Fill
             if is_conf:
                 fill_w = int(bar_w * min(1.0, score_val))
                 cv2.rectangle(display, (bar_x, y_offset), (bar_x + fill_w, y_offset + bar_h), color, -1)
-            # Label
             label_color = (255, 255, 255) if is_conf else (100, 100, 100)
             txt = f"{label}: {score_val:.2f}" if is_conf else f"{label}: n/a"
             cv2.putText(display, txt, (bar_x + 4, y_offset + 14), cv2.FONT_HERSHEY_SIMPLEX, 0.4, label_color, 1)
             y_offset += bar_h + 4
 
-        # ── Confidence bar (wider) ──
+        # ── Confidence bar ──
         y_offset += 4
-        conf = scores.get("confidence", 0)
-        threshold = detector.threshold
         conf_color = (0, 0, 255) if conf >= threshold else (100, 100, 100)
-        overlay_bg = display.copy()
-        cv2.rectangle(overlay_bg, (bar_x, y_offset), (bar_x + bar_w, y_offset + 24), (30, 30, 30), -1)
-        cv2.addWeighted(overlay_bg, 0.7, display, 0.3, 0, display)
         cv2.rectangle(
             display, (bar_x, y_offset),
             (bar_x + int(bar_w * min(1.0, conf)), y_offset + 24),

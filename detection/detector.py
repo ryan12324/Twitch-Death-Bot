@@ -64,7 +64,7 @@ class DeathDetector:
         self._load_templates()
 
     def _load_templates(self) -> None:
-        """Load reference template images (sub-images to search for)."""
+        """Load reference template images and pre-compute scaled versions."""
         template_path = TEMPLATES_DIR / self.profile.template_dir
         logger.info(
             "Looking for templates in: %s (exists=%s)",
@@ -107,6 +107,20 @@ class DeathDetector:
             self.profile.display_name,
         )
 
+        # Pre-compute scaled templates + edge maps for all search scales
+        self._scaled_cache: dict[tuple[int, float], tuple[np.ndarray, np.ndarray]] = {}
+        for t_idx, template in enumerate(self.templates):
+            tmpl_h, tmpl_w = template.shape[:2]
+            for scale in SEARCH_SCALES:
+                new_w = int(tmpl_w * scale)
+                new_h = int(tmpl_h * scale)
+                if new_w < 10 or new_h < 10:
+                    continue
+                scaled = cv2.resize(template, (new_w, new_h))
+                scaled_edges = cv2.Canny(scaled, 50, 150)
+                self._scaled_cache[(t_idx, scale)] = (scaled, scaled_edges)
+        logger.info("Pre-cached %d scaled template variants", len(self._scaled_cache))
+
     def _extract_region(
         self, frame: np.ndarray, region: ScreenRegion
     ) -> np.ndarray:
@@ -137,17 +151,13 @@ class DeathDetector:
                 if 0.05 < s < 3.0 and round(s, 4) not in scales:
                     scales.append(round(s, 4))
 
-        logger.info(
-            "scales: template %dx%d in frame %dx%d -> %s",
-            tmpl_w, tmpl_h, frame_w, frame_h, scales,
-        )
         return scales
 
-    def _template_match_score(self, frame: np.ndarray) -> float:
+    def _template_match_score(self, frame: np.ndarray, frame_gray: np.ndarray) -> float:
         """
         Slide each template across the frame at multiple scales.
-        Returns the best match score (0-1). This is a true sub-image
-        search — the template can be found anywhere on screen.
+        Returns the best match score (0-1). Uses pre-computed scaled
+        template cache to avoid per-frame resize/Canny overhead.
 
         Uses both pixel-based AND edge-based matching. Edge matching
         is critical for games like Dark Souls where the death overlay
@@ -155,15 +165,21 @@ class DeathDetector:
         background pixels change depending on where you die.
         """
         if not self.templates:
-            logger.info("template_match: no templates loaded, returning 0.0")
             self._last_match_loc = None
             return 0.0
 
-        frame_gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
         frame_h, frame_w = frame_gray.shape[:2]
         frame_edges = cv2.Canny(frame_gray, 50, 150)
 
-        logger.info("template_match: frame=%dx%d, %d template(s)", frame_w, frame_h, len(self.templates))
+        # Pre-extract search regions once (reused across all scales)
+        search_regions: list[tuple[np.ndarray, np.ndarray, int, int]] = []
+        if self.profile.screen_regions:
+            for region in self.profile.screen_regions:
+                roi_g = self._extract_region(frame_gray, region)
+                roi_e = self._extract_region(frame_edges, region)
+                ox = int(region.x_min * frame_w)
+                oy = int(region.y_min * frame_h)
+                search_regions.append((roi_g, roi_e, ox, oy))
 
         best_score = 0.0
         best_match_loc = None  # ((x, y), (w, h), score)
@@ -171,48 +187,31 @@ class DeathDetector:
         for t_idx, template in enumerate(self.templates):
             tmpl_h, tmpl_w = template.shape[:2]
             scales = self._compute_scales(tmpl_w, tmpl_h, frame_w, frame_h)
-            logger.info(
-                "template_match: template[%d] %dx%d, trying %d scales: %s",
-                t_idx, tmpl_w, tmpl_h, len(scales), scales,
-            )
 
             for scale in scales:
-                new_w = int(tmpl_w * scale)
-                new_h = int(tmpl_h * scale)
+                # Use pre-computed cache when available, else compute on the fly
+                cache_key = (t_idx, scale)
+                if cache_key in self._scaled_cache:
+                    scaled, scaled_edges = self._scaled_cache[cache_key]
+                    new_w, new_h = scaled.shape[1], scaled.shape[0]
+                else:
+                    new_w = int(tmpl_w * scale)
+                    new_h = int(tmpl_h * scale)
+                    if new_w < 10 or new_h < 10:
+                        continue
+                    scaled = cv2.resize(template, (new_w, new_h))
+                    scaled_edges = cv2.Canny(scaled, 50, 150)
 
                 if new_w >= frame_w or new_h >= frame_h:
-                    logger.debug(
-                        "  scale=%.4f -> %dx%d SKIPPED (too large for %dx%d frame)",
-                        scale, new_w, new_h, frame_w, frame_h,
-                    )
-                    continue
-                if new_w < 10 or new_h < 10:
-                    logger.debug(
-                        "  scale=%.4f -> %dx%d SKIPPED (too small)",
-                        scale, new_w, new_h,
-                    )
                     continue
 
-                scaled = cv2.resize(template, (new_w, new_h))
-                scaled_edges = cv2.Canny(scaled, 50, 150)
+                # Build search areas from pre-extracted regions
+                search_areas: list[tuple[np.ndarray, np.ndarray, int, int]] = []
+                if search_regions:
+                    for roi_g, roi_e, ox, oy in search_regions:
+                        if roi_g.shape[0] > new_h and roi_g.shape[1] > new_w:
+                            search_areas.append((roi_g, roi_e, ox, oy))
 
-                # Build search areas from screen regions, fall back to full frame
-                search_areas = []  # (gray, edge, offset_x, offset_y)
-                if self.profile.screen_regions:
-                    for region in self.profile.screen_regions:
-                        area_g = self._extract_region(frame_gray, region)
-                        area_e = self._extract_region(frame_edges, region)
-                        if area_g.shape[0] > new_h and area_g.shape[1] > new_w:
-                            ox = int(region.x_min * frame_w)
-                            oy = int(region.y_min * frame_h)
-                            search_areas.append((area_g, area_e, ox, oy))
-                        else:
-                            logger.debug(
-                                "  scale=%.4f region too small (%dx%d) for template %dx%d",
-                                scale, area_g.shape[1], area_g.shape[0], new_w, new_h,
-                            )
-
-                using_regions = len(search_areas) > 0
                 if not search_areas:
                     search_areas = [(frame_gray, frame_edges, 0, 0)]
 
@@ -229,17 +228,6 @@ class DeathDetector:
                     )
                     _, max_val_e, _, max_loc_e = cv2.minMaxLoc(result_e)
 
-                    logger.info(
-                        "  scale=%.4f -> %dx%d | area=%dx%d region=%s | "
-                        "pixel=%.4f@(%d,%d) edge=%.4f@(%d,%d) | best=%.4f",
-                        scale, new_w, new_h,
-                        area_g.shape[1], area_g.shape[0],
-                        using_regions,
-                        max_val, max_loc[0], max_loc[1],
-                        max_val_e, max_loc_e[0], max_loc_e[1],
-                        best_score,
-                    )
-
                     # Track best match location for overlay
                     if max_val > best_score:
                         best_score = max_val
@@ -255,12 +243,11 @@ class DeathDetector:
                         )
 
                     if best_score > 0.85:
-                        logger.info("  EARLY EXIT: best_score=%.4f > 0.85", best_score)
                         self._last_match_loc = best_match_loc
                         return best_score
 
         self._last_match_loc = best_match_loc
-        logger.info("template_match: final best_score=%.4f", best_score)
+        logger.debug("template_match: final best_score=%.4f", best_score)
         return best_score
 
     def _color_analysis_score(self, frame: np.ndarray) -> float:
@@ -271,37 +258,29 @@ class DeathDetector:
         pollute the score.
         """
         if not self.profile.dominant_colors:
-            logger.info("color_analysis: no dominant_colors in profile, returning 0.0")
             return 0.0
 
         # Build list of areas to analyze
         if self.profile.screen_regions:
             areas = [self._extract_region(frame, r) for r in self.profile.screen_regions]
-            logger.info("color_analysis: using %d screen region(s)", len(areas))
         else:
             areas = [frame]
-            logger.info("color_analysis: no regions, using full frame")
 
         max_ratio = 0.0
 
-        for i, color_range in enumerate(self.profile.dominant_colors):
+        for color_range in self.profile.dominant_colors:
             lower = np.array(color_range.lower, dtype=np.uint8)
             upper = np.array(color_range.upper, dtype=np.uint8)
             for area in areas:
                 total_pixels = area.shape[0] * area.shape[1]
                 mask = cv2.inRange(area, lower, upper)
                 ratio = np.count_nonzero(mask) / total_pixels
-                logger.info(
-                    "color_analysis: range[%d] BGR(%s)-(%s) area=%dx%d -> ratio=%.4f",
-                    i, color_range.lower, color_range.upper,
-                    area.shape[1], area.shape[0], ratio,
-                )
                 max_ratio = max(max_ratio, ratio)
 
-        logger.info("color_analysis: final score=%.4f", max_ratio)
+        logger.debug("color_analysis: final score=%.4f", max_ratio)
         return max_ratio
 
-    def _brightness_score(self, frame: np.ndarray) -> float:
+    def _brightness_score(self, frame: np.ndarray, frame_gray: np.ndarray) -> float:
         """Score based on overall brightness matching death screen profile.
 
         When screen_regions are defined, computes the mean brightness across
@@ -310,18 +289,11 @@ class DeathDetector:
         if self.profile.screen_regions:
             brightness_values = []
             for region in self.profile.screen_regions:
-                crop = self._extract_region(frame, region)
-                crop_gray = cv2.cvtColor(crop, cv2.COLOR_BGR2GRAY)
+                crop_gray = self._extract_region(frame_gray, region)
                 brightness_values.append(np.mean(crop_gray))
             mean_brightness = float(np.mean(brightness_values))
-            logger.info(
-                "brightness: using %d region(s), per-region means=%s",
-                len(brightness_values),
-                [f"{v:.1f}" for v in brightness_values],
-            )
         else:
-            gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-            mean_brightness = np.mean(gray)
+            mean_brightness = float(np.mean(frame_gray))
 
         score = 0.0
 
@@ -331,40 +303,18 @@ class DeathDetector:
                     score,
                     1.0 - (mean_brightness / self.profile.max_brightness),
                 )
-                logger.info(
-                    "brightness: mean=%.1f <= max_thresh=%d -> score=%.4f",
-                    mean_brightness, self.profile.max_brightness, score,
-                )
-            else:
-                logger.info(
-                    "brightness: mean=%.1f > max_thresh=%d -> no match",
-                    mean_brightness, self.profile.max_brightness,
-                )
 
         if self.profile.min_brightness is not None:
             if mean_brightness >= self.profile.min_brightness:
                 new_score = min(1.0, mean_brightness / 255.0)
                 score = max(score, new_score)
-                logger.info(
-                    "brightness: mean=%.1f >= min_thresh=%d -> score=%.4f",
-                    mean_brightness, self.profile.min_brightness, score,
-                )
-            else:
-                logger.info(
-                    "brightness: mean=%.1f < min_thresh=%d -> no match",
-                    mean_brightness, self.profile.min_brightness,
-                )
 
-        if self.profile.max_brightness is None and self.profile.min_brightness is None:
-            logger.info("brightness: no thresholds in profile, returning 0.0")
-
-        logger.info("brightness: final score=%.4f (mean=%.1f)", score, mean_brightness)
+        logger.debug("brightness: final score=%.4f (mean=%.1f)", score, mean_brightness)
         return score
 
     def _fade_detection_score(self, frame: np.ndarray) -> float:
         """Detect if the screen has faded to the death color."""
         if self.profile.fade_to_color is None:
-            logger.info("fade: no fade_to_color in profile, returning 0.0")
             return 0.0
 
         lower = np.array(self.profile.fade_to_color.lower, dtype=np.uint8)
@@ -379,32 +329,26 @@ class DeathDetector:
         else:
             score = fade_ratio * 0.5
 
-        logger.info(
-            "fade: BGR(%s)-(%s) -> ratio=%.4f, score=%.4f",
-            self.profile.fade_to_color.lower,
-            self.profile.fade_to_color.upper,
-            fade_ratio, score,
-        )
+        logger.debug("fade: ratio=%.4f, score=%.4f", fade_ratio, score)
         return score
 
-    def _scene_change_score(self, frame: np.ndarray) -> float:
-        """Detect sudden scene changes that may indicate death."""
+    def _scene_change_score(self, frame_gray: np.ndarray) -> float:
+        """Detect sudden scene changes that may indicate death.
+
+        Expects frame_gray (current) and self.previous_frame (grayscale).
+        """
         if self.previous_frame is None:
-            logger.info("scene_change: no previous frame, returning 0.0")
             return 0.0
 
-        current_gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-        previous_gray = cv2.cvtColor(self.previous_frame, cv2.COLOR_BGR2GRAY)
-
         size = (320, 240)
-        current_small = cv2.resize(current_gray, size)
-        previous_small = cv2.resize(previous_gray, size)
+        current_small = cv2.resize(frame_gray, size)
+        previous_small = cv2.resize(self.previous_frame, size)
 
         diff = cv2.absdiff(current_small, previous_small)
         mean_diff = np.mean(diff)
 
         score = min(1.0, mean_diff / 80.0)
-        logger.info("scene_change: mean_diff=%.1f -> score=%.4f", mean_diff, score)
+        logger.debug("scene_change: mean_diff=%.1f -> score=%.4f", mean_diff, score)
         return score
 
     def _text_detection_score(self, frame: np.ndarray) -> float:
@@ -414,7 +358,6 @@ class DeathDetector:
         when defined). Returns the max OCR confidence for any indicator match.
         """
         if not self.profile.text_indicators:
-            logger.info("text_detection: no text_indicators in profile, returning 0.0")
             self._last_text_boxes = []
             return 0.0
 
@@ -425,7 +368,7 @@ class DeathDetector:
                 self._ocr_reader = easyocr.Reader(['en'], gpu=False, verbose=False)
                 logger.info("text_detection: EasyOCR reader initialized")
             except ImportError:
-                logger.warning("text_detection: easyocr not installed, returning 0.0")
+                logger.warning("text_detection: easyocr not installed")
                 self._last_text_boxes = []
                 return 0.0
 
@@ -456,10 +399,6 @@ class DeathDetector:
             for bbox, text, confidence in results:
                 text_lower = text.lower()
                 matched = any(ind in text_lower for ind in indicators_lower)
-                logger.info(
-                    "text_detection: detected '%s' confidence=%.4f matched=%s",
-                    text, confidence, matched,
-                )
                 # Offset bbox to frame coordinates
                 offset_bbox = [[pt[0] + ox, pt[1] + oy] for pt in bbox]
                 text_boxes.append((offset_bbox, text, confidence, matched))
@@ -467,7 +406,7 @@ class DeathDetector:
                     best_score = max(best_score, confidence)
 
         self._last_text_boxes = text_boxes
-        logger.info("text_detection: final score=%.4f", best_score)
+        logger.debug("text_detection: final score=%.4f", best_score)
         return best_score
 
     @staticmethod
@@ -499,26 +438,41 @@ class DeathDetector:
         Returns:
             (is_death, confidence) - whether death was detected and confidence 0-1
         """
-        logger.info(
-            "=== analyze_frame START === input=%dx%d profile=%s",
-            frame.shape[1], frame.shape[0], self.profile.name,
-        )
         frame = self._normalize_frame(frame)
         now = time.time()
 
+        # Compute grayscale once — shared across template, brightness, scene_change
+        frame_gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+
         # Check cooldown
         if now - self.last_detection_time < self.cooldown:
-            logger.info("analyze_frame: in cooldown, skipping")
-            self.previous_frame = frame.copy()
+            self.previous_frame = frame_gray
             return False, 0.0
 
-        # Compute individual scores
-        template_score = self._template_match_score(frame)
+        # --- Cheap signals first (fast: color mask, brightness mean, fade mask, scene diff) ---
         color_score = self._color_analysis_score(frame)
-        brightness_score = self._brightness_score(frame)
+        brightness_score = self._brightness_score(frame, frame_gray)
         fade_score = self._fade_detection_score(frame)
-        scene_change = self._scene_change_score(frame)
-        text_score = self._text_detection_score(frame)
+        scene_change = self._scene_change_score(frame_gray)
+
+        # --- Medium cost: template matching (fast with pre-computed cache) ---
+        template_score = self._template_match_score(frame, frame_gray)
+
+        # --- Expensive: OCR (~1-2s). Gate behind cheaper signals. ---
+        # Only run OCR when at least one cheaper signal shows promise,
+        # unless text is the only configured signal for this profile.
+        has_cheap_signals = bool(
+            self.templates or self.profile.dominant_colors
+            or self.profile.max_brightness is not None
+            or self.profile.min_brightness is not None
+            or self.profile.fade_to_color is not None
+        )
+        gate_score = max(template_score, color_score, brightness_score, fade_score)
+        if self.profile.text_indicators and (not has_cheap_signals or gate_score > 0.15):
+            text_score = self._text_detection_score(frame)
+        else:
+            text_score = 0.0
+            self._last_text_boxes = []
 
         # Build map of configured signals (only signals the profile has data for)
         configured: dict[str, float] = {}
@@ -551,16 +505,6 @@ class DeathDetector:
         else:
             confidence = 0.0
 
-        # Log active signals for debugging
-        if total_weight > 0:
-            normalized = {s: round(active[s] / total_weight, 3) for s in active}
-        else:
-            normalized = {}
-        logger.info(
-            "weighting: configured=%s raw_weights=%s normalized=%s",
-            list(configured.keys()), active, normalized,
-        )
-
         # Store individual scores for the web GUI
         self.last_scores = {
             "template": round(template_score, 4),
@@ -573,7 +517,8 @@ class DeathDetector:
             "configured": list(configured.keys()),
         }
 
-        self.previous_frame = frame.copy()
+        # Store grayscale only — saves memory and avoids redundant conversions
+        self.previous_frame = frame_gray
 
         # Require consecutive frames to reduce false positives
         if confidence >= self.threshold:
@@ -583,13 +528,11 @@ class DeathDetector:
 
         is_death = self.death_frame_count >= self.required_consecutive
 
-        logger.info(
-            "=== analyze_frame END === confidence=%.4f threshold=%.2f "
-            "consecutive=%d/%d is_death=%s | "
-            "template=%.4f text=%.4f color=%.4f brightness=%.4f fade=%.4f scene=%.4f",
+        logger.debug(
+            "analyze_frame: confidence=%.4f threshold=%.2f "
+            "consecutive=%d/%d is_death=%s",
             confidence, self.threshold,
             self.death_frame_count, self.required_consecutive, is_death,
-            template_score, text_score, color_score, brightness_score, fade_score, scene_change,
         )
 
         if is_death:
