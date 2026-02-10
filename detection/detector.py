@@ -482,69 +482,85 @@ class DeathDetector:
         frame = self._normalize_frame(frame)
         now = time.time()
 
+        # Resolve weights up-front so we can skip zero-weight signals entirely
+        profile_weights = self.profile.weights or {}
+        def _weight(signal: str) -> float:
+            return profile_weights.get(signal, DEFAULT_WEIGHTS.get(signal, 1.0))
+
         # When screen_regions are defined, skip the expensive full-frame
         # grayscale conversion.  Individual methods convert their own region
         # crops to gray internally.  We only need a small 320x240 grayscale
         # for scene_change_score (which resizes to that size anyway).
+        needs_gray = (
+            (self.templates and _weight("template") > 0)
+            or (self.profile.max_brightness is not None or self.profile.min_brightness is not None)
+                and _weight("brightness") > 0
+        )
+        needs_gray_small = _weight("scene_change") > 0
+
         if self.profile.screen_regions:
             frame_gray = None  # lazy — methods convert per-region as needed
-            frame_gray_small = cv2.cvtColor(
-                cv2.resize(frame, (320, 240)), cv2.COLOR_BGR2GRAY
+            frame_gray_small = (
+                cv2.cvtColor(cv2.resize(frame, (320, 240)), cv2.COLOR_BGR2GRAY)
+                if needs_gray_small else None
             )
         else:
-            frame_gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+            frame_gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY) if needs_gray or needs_gray_small else None
             frame_gray_small = frame_gray  # _scene_change_score will resize
 
         # Check cooldown
         if now - self.last_detection_time < self.cooldown:
-            self.previous_frame = frame_gray_small
+            if frame_gray_small is not None:
+                self.previous_frame = frame_gray_small
             return False, 0.0
 
         # --- Cheap signals first (fast: color mask, brightness mean, fade mask, scene diff) ---
-        color_score = self._color_analysis_score(frame)
-        brightness_score = self._brightness_score(frame, frame_gray)
-        fade_score = self._fade_detection_score(frame)
-        scene_change = self._scene_change_score(frame_gray_small)
+        color_score = self._color_analysis_score(frame) if self.profile.dominant_colors and _weight("color") > 0 else 0.0
+        brightness_score = self._brightness_score(frame, frame_gray) if (self.profile.max_brightness is not None or self.profile.min_brightness is not None) and _weight("brightness") > 0 else 0.0
+        fade_score = self._fade_detection_score(frame) if self.profile.fade_to_color is not None and _weight("fade") > 0 else 0.0
+        scene_change = self._scene_change_score(frame_gray_small) if needs_gray_small else 0.0
 
         # --- Medium cost: template matching (fast with pre-computed cache) ---
-        template_score = self._template_match_score(frame, frame_gray)
+        template_score = self._template_match_score(frame, frame_gray) if self.templates and _weight("template") > 0 else 0.0
 
-        # --- Expensive: OCR (~1-2s). Gate behind cheaper signals. ---
+        # --- Expensive: OCR. Gate behind cheaper signals. ---
         # Only run OCR when cheaper signals strongly suggest a death,
         # unless text is the only configured signal for this profile.
-        has_cheap_signals = bool(
-            self.templates or self.profile.dominant_colors
-            or self.profile.max_brightness is not None
-            or self.profile.min_brightness is not None
-            or self.profile.fade_to_color is not None
-        )
-        gate_score = max(template_score, color_score, brightness_score, fade_score)
-        if self.profile.text_indicators and (not has_cheap_signals or gate_score > 0.5):
-            text_score = self._text_detection_score(frame)
+        text_score = 0.0
+        if self.profile.text_indicators and _weight("text") > 0:
+            has_cheap_signals = bool(
+                self.templates or self.profile.dominant_colors
+                or self.profile.max_brightness is not None
+                or self.profile.min_brightness is not None
+                or self.profile.fade_to_color is not None
+            )
+            gate_score = max(template_score, color_score, brightness_score, fade_score)
+            if not has_cheap_signals or gate_score > 0.5:
+                text_score = self._text_detection_score(frame)
+            else:
+                self._last_text_boxes = []
         else:
-            text_score = 0.0
             self._last_text_boxes = []
 
-        # Build map of configured signals (only signals the profile has data for)
+        # Build map of configured signals (only signals the profile has data for AND weight > 0)
         configured: dict[str, float] = {}
-        if self.templates:
+        if self.templates and _weight("template") > 0:
             configured["template"] = template_score
-        if self.profile.text_indicators:
+        if self.profile.text_indicators and _weight("text") > 0:
             configured["text"] = text_score
-        if self.profile.dominant_colors:
+        if self.profile.dominant_colors and _weight("color") > 0:
             configured["color"] = color_score
-        if self.profile.max_brightness is not None or self.profile.min_brightness is not None:
+        if (self.profile.max_brightness is not None or self.profile.min_brightness is not None) and _weight("brightness") > 0:
             configured["brightness"] = brightness_score
-        if self.profile.fade_to_color is not None:
+        if self.profile.fade_to_color is not None and _weight("fade") > 0:
             configured["fade"] = fade_score
-        if self.previous_frame is not None:
+        if self.previous_frame is not None and _weight("scene_change") > 0:
             configured["scene_change"] = scene_change
 
         # Collect weights for configured signals only
-        profile_weights = self.profile.weights or {}
         active: dict[str, float] = {}
         for signal in configured:
-            active[signal] = profile_weights.get(signal, DEFAULT_WEIGHTS.get(signal, 1.0))
+            active[signal] = _weight(signal)
 
         # Normalize and compute weighted average
         total_weight = sum(active.values())
