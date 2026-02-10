@@ -1583,9 +1583,15 @@ async function testDetection() {
     // Scores
     const scoresEl = document.getElementById('testScores');
     const s = data.scores || {};
-    scoresEl.innerHTML = Object.entries(s).map(([k, v]) =>
-      `<div class="test-score"><span class="name">${k}</span><span class="val">${v.toFixed(4)}</span></div>`
-    ).join('');
+    const testConfigured = s.configured || [];
+    scoresEl.innerHTML = Object.entries(s)
+      .filter(([k]) => k !== 'configured')
+      .map(([k, v]) => {
+        const isConf = k === 'scene_change' || k === 'confidence' || testConfigured.length === 0 || testConfigured.includes(k);
+        const valText = isConf ? v.toFixed(4) : '(not configured)';
+        const dimClass = isConf ? '' : ' style="opacity:0.4"';
+        return `<div class="test-score"${dimClass}><span class="name">${k}</span><span class="val">${valText}</span></div>`;
+      }).join('');
 
     // Debug images
     debugImageData = data.debug_images || {};
