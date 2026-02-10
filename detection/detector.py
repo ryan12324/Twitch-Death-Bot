@@ -19,7 +19,7 @@ from pathlib import Path
 import cv2
 import numpy as np
 
-from game_profiles.profiles import GameProfile, ScreenRegion
+from game_profiles.profiles import DEFAULT_WEIGHTS, GameProfile, ScreenRegion
 
 logger = logging.getLogger(__name__)
 
@@ -491,47 +491,43 @@ class DeathDetector:
         scene_change = self._scene_change_score(frame)
         text_score = self._text_detection_score(frame)
 
-        # Compute base confidence from persistent signals (things that stay
-        # true for every frame of a death screen, not just the transition).
-        if text_score > 0.7:
-            weight_tier = "STRONG_TEXT"
-            confidence = (
-                text_score * 0.55
-                + template_score * 0.20
-                + color_score * 0.10
-                + brightness_score * 0.05
-                + fade_score * 0.10
-            )
-        elif self.templates and template_score > 0.75:
-            weight_tier = "STRONG_TEMPLATE"
-            confidence = (
-                template_score * 0.55
-                + text_score * 0.10
-                + color_score * 0.10
-                + brightness_score * 0.10
-                + fade_score * 0.15
-            )
-        elif self.templates and template_score > 0.40:
-            weight_tier = "MODERATE_TEMPLATE"
-            confidence = (
-                template_score * 0.35
-                + text_score * 0.15
-                + color_score * 0.15
-                + brightness_score * 0.10
-                + fade_score * 0.25
+        # Build map of configured signals (only signals the profile has data for)
+        configured: dict[str, float] = {}
+        if self.templates:
+            configured["template"] = template_score
+        if self.profile.text_indicators:
+            configured["text"] = text_score
+        if self.profile.dominant_colors:
+            configured["color"] = color_score
+        if self.profile.max_brightness is not None or self.profile.min_brightness is not None:
+            configured["brightness"] = brightness_score
+        if self.profile.fade_to_color is not None:
+            configured["fade"] = fade_score
+
+        # Collect weights for configured signals only
+        profile_weights = self.profile.weights or {}
+        active: dict[str, float] = {}
+        for signal in configured:
+            active[signal] = profile_weights.get(signal, DEFAULT_WEIGHTS.get(signal, 1.0))
+
+        # Normalize and compute weighted average
+        total_weight = sum(active.values())
+        if total_weight > 0:
+            confidence = sum(
+                configured[signal] * (active[signal] / total_weight)
+                for signal in active
             )
         else:
-            weight_tier = "VISUAL_ONLY"
-            confidence = (
-                text_score * 0.15
-                + color_score * 0.30
-                + brightness_score * 0.25
-                + fade_score * 0.30
-            )
+            confidence = 0.0
 
+        # Log active signals for debugging
+        if total_weight > 0:
+            normalized = {s: round(active[s] / total_weight, 3) for s in active}
+        else:
+            normalized = {}
         logger.info(
-            "weighting: tier=%s templates_loaded=%d template_score=%.4f text_score=%.4f",
-            weight_tier, len(self.templates), template_score, text_score,
+            "weighting: configured=%s raw_weights=%s normalized=%s",
+            list(configured.keys()), active, normalized,
         )
 
         # Scene change is a bonus for transitions, never a penalty.
@@ -554,6 +550,7 @@ class DeathDetector:
             "fade": round(fade_score, 4),
             "scene_change": round(scene_change, 4),
             "confidence": round(confidence, 4),
+            "configured": list(configured.keys()),
         }
 
         self.previous_frame = frame.copy()

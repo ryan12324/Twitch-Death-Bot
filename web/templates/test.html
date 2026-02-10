@@ -217,6 +217,10 @@
     border-radius: 4px;
     transition: width 0.3s;
   }
+  .score-bar.unconfigured .bar-header .name { color: #555; }
+  .score-bar.unconfigured .bar-header .value { color: #555; }
+  .score-bar.unconfigured .bar-track { opacity: 0.3; }
+  .score-bar.unconfigured .bar-fill { background: #444 !important; }
   .bar-template .bar-fill { background: #2196f3; }
   .bar-text .bar-fill { background: #ff8f00; }
   .bar-color .bar-fill { background: #4caf50; }
@@ -622,12 +626,16 @@ async function pollStatus() {
 
     // Update scores
     const scores = data.scores || {};
+    const configured = scores.configured || [];
     for (const key of ['template', 'text', 'color', 'brightness', 'fade', 'scene_change']) {
       const val = scores[key] || 0;
       const el = document.getElementById('s-' + key);
       const bar = document.getElementById('b-' + key);
-      if (el) el.textContent = val.toFixed(2);
-      if (bar) bar.style.width = (val * 100) + '%';
+      const barParent = bar ? bar.closest('.score-bar') : null;
+      const isConfigured = key === 'scene_change' || configured.length === 0 || configured.includes(key);
+      if (barParent) barParent.classList.toggle('unconfigured', !isConfigured);
+      if (el) el.textContent = isConfigured ? val.toFixed(2) : '(not configured)';
+      if (bar) bar.style.width = isConfigured ? (val * 100) + '%' : '0%';
     }
     const conf = scores.confidence || 0;
     document.getElementById('s-confidence').textContent = conf.toFixed(3);
@@ -722,12 +730,19 @@ async function analyzeImage(input) {
 
   const scoresEl = document.getElementById('uploadScores');
   const s = data.scores || {};
-  scoresEl.innerHTML = Object.entries(s).map(([k, v]) =>
-    `<div style="display:flex;justify-content:space-between;font-size:12px;padding:2px 0">
-      <span style="color:var(--text-dim)">${k}</span>
-      <span style="font-weight:600;font-variant-numeric:tabular-nums">${v.toFixed(4)}</span>
-    </div>`
-  ).join('');
+  const uploadConfigured = s.configured || [];
+  scoresEl.innerHTML = Object.entries(s)
+    .filter(([k]) => k !== 'configured')
+    .map(([k, v]) => {
+      const isConf = k === 'scene_change' || k === 'confidence' || uploadConfigured.length === 0 || uploadConfigured.includes(k);
+      const dimStyle = isConf ? 'color:var(--text-dim)' : 'color:#555';
+      const valText = isConf ? v.toFixed(4) : '(not configured)';
+      const valStyle = isConf ? 'font-weight:600;font-variant-numeric:tabular-nums' : 'color:#555;font-size:11px';
+      return `<div style="display:flex;justify-content:space-between;font-size:12px;padding:2px 0">
+        <span style="${dimStyle}">${k}</span>
+        <span style="${valStyle}">${valText}</span>
+      </div>`;
+    }).join('');
 
   // Populate debug gallery
   debugImageData = data.debug_images || {};

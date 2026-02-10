@@ -15,6 +15,15 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 
+DEFAULT_WEIGHTS: dict[str, float] = {
+    "template": 5.0,
+    "text": 4.0,
+    "color": 3.0,
+    "brightness": 2.0,
+    "fade": 3.0,
+}
+
+
 @dataclass
 class ScreenRegion:
     """A normalized region of the screen (0.0 to 1.0)."""
@@ -51,6 +60,8 @@ class GameProfile:
     min_brightness: int | None = None
     # Text strings to look for via OCR (e.g. "YOU DIED")
     text_indicators: list[str] = field(default_factory=list)
+    # Per-signal weights for confidence calculation
+    weights: dict[str, float] = field(default_factory=dict)
 
 
 # ---------------------------------------------------------------------------
@@ -85,6 +96,7 @@ def _parse_profile(data: dict) -> GameProfile:
         min_brightness=data.get("min_brightness"),
         cooldown_override=data.get("cooldown_override"),
         text_indicators=data.get("text_indicators", []),
+        weights=data.get("weights", {}),
     )
 
 
@@ -107,6 +119,7 @@ def profile_to_dict(profile: GameProfile) -> dict:
         "min_brightness": profile.min_brightness,
         "cooldown_override": profile.cooldown_override,
         "text_indicators": profile.text_indicators,
+        "weights": profile.weights,
     }
 
 

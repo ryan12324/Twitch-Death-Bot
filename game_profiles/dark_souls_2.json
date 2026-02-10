@@ -40,5 +40,6 @@
   "max_brightness": 55,
   "min_brightness": null,
   "cooldown_override": null,
-  "text_indicators": ["YOU DIED"]
+  "text_indicators": ["YOU DIED"],
+  "weights": {"template": 5, "text": 5, "color": 2, "brightness": 2, "fade": 1}
 }

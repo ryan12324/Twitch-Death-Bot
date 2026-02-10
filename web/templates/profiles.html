@@ -846,6 +846,45 @@
         </div>
       </div>
 
+      <!-- Signal Weights -->
+      <div class="section">
+        <div class="section-head" onclick="toggleSection(this)">
+          <h3>Signal Weights</h3>
+          <span class="chevron">&#9660;</span>
+        </div>
+        <div class="section-body">
+          <p style="font-size:12px;color:var(--text-muted);margin-bottom:10px">
+            Relative importance of each signal. Only configured signals participate in scoring.
+          </p>
+          <div class="slider-row">
+            <label style="min-width:90px">Template</label>
+            <input type="range" id="wTemplate" min="0" max="10" step="1" value="5" oninput="updateWeightVal('template')">
+            <span class="slider-val" id="wTemplateVal">5</span>
+          </div>
+          <div class="slider-row">
+            <label style="min-width:90px">Text</label>
+            <input type="range" id="wText" min="0" max="10" step="1" value="4" oninput="updateWeightVal('text')">
+            <span class="slider-val" id="wTextVal">4</span>
+          </div>
+          <div class="slider-row">
+            <label style="min-width:90px">Color</label>
+            <input type="range" id="wColor" min="0" max="10" step="1" value="3" oninput="updateWeightVal('color')">
+            <span class="slider-val" id="wColorVal">3</span>
+          </div>
+          <div class="slider-row">
+            <label style="min-width:90px">Brightness</label>
+            <input type="range" id="wBrightness" min="0" max="10" step="1" value="2" oninput="updateWeightVal('brightness')">
+            <span class="slider-val" id="wBrightnessVal">2</span>
+          </div>
+          <div class="slider-row">
+            <label style="min-width:90px">Fade</label>
+            <input type="range" id="wFade" min="0" max="10" step="1" value="3" oninput="updateWeightVal('fade')">
+            <span class="slider-val" id="wFadeVal">3</span>
+          </div>
+          <button class="btn btn-secondary" onclick="resetWeightsToDefaults()" style="margin-top:8px;width:auto;padding:8px 16px">Reset to Defaults</button>
+        </div>
+      </div>
+
       <!-- Templates -->
       <div class="section collapsed">
         <div class="section-head" onclick="toggleSection(this)">
@@ -886,6 +925,7 @@
       <!-- Actions -->
       <div class="action-bar">
         <button class="btn btn-accent" onclick="saveCurrentProfile()">Save Profile</button>
+        <button class="btn btn-secondary" onclick="exportProfileJSON()">Export JSON</button>
         <button class="btn btn-danger" id="deleteBtn" onclick="deleteCurrentProfile()">Delete</button>
         <div style="flex:1"></div>
       </div>
@@ -913,7 +953,10 @@ let sampledRGB = null;        // {r,g,b} last sampled pixel
 let isDrawing = false;
 let drawStart = null;
 let meanBrightness = null;
+let signalWeights = {};
 let debugImageData = {};
+
+const DEFAULT_WEIGHTS = {template: 5, text: 4, color: 3, brightness: 2, fade: 3};
 
 // ═══════════════════════════════════════════════════════════════
 // INIT
@@ -978,6 +1021,7 @@ function selectProfile(name) {
   document.getElementById('testResults').classList.remove('show');
   document.getElementById('deleteBtn').disabled = (name === 'generic');
 
+  loadWeightsUI(p.weights || {});
   renderRegions();
   renderColors();
   renderFadeColor();
@@ -1018,6 +1062,7 @@ function newProfile() {
   document.getElementById('deleteBtn').disabled = true;
   document.getElementById('templateGrid').innerHTML = '';
 
+  loadWeightsUI({});
   renderRegions();
   renderColors();
   renderFadeColor();
@@ -1448,6 +1493,7 @@ function buildProfileData() {
     max_brightness: maxOn ? parseInt(document.getElementById('maxBrightSlider').value) : null,
     min_brightness: minOn ? parseInt(document.getElementById('minBrightSlider').value) : null,
     cooldown_override: cooldown ? parseInt(cooldown) : null,
+    weights: Object.assign({}, signalWeights),
   };
 }
 
@@ -1572,6 +1618,51 @@ function showDebugImg(key) {
 // ═══════════════════════════════════════════════════════════════
 // UI HELPERS
 // ═══════════════════════════════════════════════════════════════
+
+// ═══════════════════════════════════════════════════════════════
+// SIGNAL WEIGHTS
+// ═══════════════════════════════════════════════════════════════
+
+function updateWeightVal(signal) {
+  const id = 'w' + signal.charAt(0).toUpperCase() + signal.slice(1);
+  const val = parseInt(document.getElementById(id).value);
+  document.getElementById(id + 'Val').textContent = val;
+  signalWeights[signal] = val;
+}
+
+function loadWeightsUI(weights) {
+  signalWeights = Object.assign({}, DEFAULT_WEIGHTS, weights || {});
+  for (const signal of Object.keys(DEFAULT_WEIGHTS)) {
+    const id = 'w' + signal.charAt(0).toUpperCase() + signal.slice(1);
+    const val = signalWeights[signal] != null ? signalWeights[signal] : DEFAULT_WEIGHTS[signal];
+    document.getElementById(id).value = val;
+    document.getElementById(id + 'Val').textContent = val;
+    signalWeights[signal] = val;
+  }
+}
+
+function resetWeightsToDefaults() {
+  loadWeightsUI(DEFAULT_WEIGHTS);
+}
+
+// ═══════════════════════════════════════════════════════════════
+// EXPORT JSON
+// ═══════════════════════════════════════════════════════════════
+
+function exportProfileJSON() {
+  const data = buildProfileData();
+  if (!data.name) { showToast('Profile name is required', 'error'); return; }
+  const json = JSON.stringify(data, null, 2) + '\n';
+  const blob = new Blob([json], {type: 'application/json'});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = data.name + '.json';
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
 
 function toggleSection(headEl) {
   headEl.closest('.section').classList.toggle('collapsed');

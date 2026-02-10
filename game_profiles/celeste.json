@@ -28,5 +28,6 @@
   "max_brightness": null,
   "min_brightness": 200,
   "cooldown_override": 3,
-  "text_indicators": []
+  "text_indicators": [],
+  "weights": {"template": 4, "color": 4, "brightness": 5}
 }
