@@ -1,11 +1,16 @@
 """
 Twitch stream frame capture using streamlink + ffmpeg.
 
-Captures frames from a live Twitch stream at a configurable interval
-and feeds them to the death detector.
+Captures frames from a live Twitch stream at a configurable FPS
+and feeds them to the death detector via a reader thread.
 
 Uses streamlink to pipe the stream directly into ffmpeg, avoiding
 the two-step URL resolution that can fail with certain Twitch configs.
+
+Architecture:
+  ffmpeg (target_fps) --[reader thread]--> _latest_frame (overwritten)
+                                                |
+  detect loop --[non-blocking grab]-------------+--> process
 """
 
 import logging
@@ -38,11 +43,11 @@ class StreamCapture:
         self,
         channel: str,
         quality: str = "720p",
-        capture_interval: float = 2.0,
+        target_fps: int = 15,
     ):
         self.channel = channel
         self.quality = quality
-        self.capture_interval = capture_interval
+        self.target_fps = target_fps
         # streamlink works with both forms but www. is more reliable
         self.stream_url = f"https://www.twitch.tv/{channel}"
 
@@ -52,6 +57,12 @@ class StreamCapture:
         self._lock = threading.Lock()
         self._latest_frame: np.ndarray | None = None
         self.last_error: str = ""
+
+        # Reader thread state
+        self._reader: threading.Thread | None = None
+        self._frame_seq: int = 0        # monotonic counter, incremented on each new frame
+        self._last_read_seq: int = 0    # seq of last frame returned by read_frame()
+        self._new_frame_event = threading.Event()
 
     def _find_quality(self) -> str | None:
         """Find the best available quality from the stream."""
@@ -106,6 +117,11 @@ class StreamCapture:
         if not quality:
             return False
 
+        # Reset sequence counters
+        self._frame_seq = 0
+        self._last_read_seq = 0
+        self._new_frame_event.clear()
+
         # streamlink pipes the stream to stdout
         try:
             self._streamlink_proc = subprocess.Popen(
@@ -142,9 +158,7 @@ class StreamCapture:
                 "-i", "pipe:0",
                 "-f", "rawvideo",
                 "-pix_fmt", "bgr24",
-                "-vf", "fps=1/{},scale=1280:720".format(
-                    max(1, int(self.capture_interval))
-                ),
+                "-vf", f"fps={self.target_fps},scale=1280:720",
                 "-an",
                 "-sn",
                 "-loglevel", "error",
@@ -168,36 +182,67 @@ class StreamCapture:
 
         self._running = True
         self.last_error = ""
+
+        # Start the reader thread that continuously ingests frames
+        self._reader = threading.Thread(target=self._reader_loop, daemon=True)
+        self._reader.start()
+
         logger.info(
-            "Stream capture started for %s (%s quality)",
+            "Stream capture started for %s (%s quality, %d fps)",
             self.channel,
             quality,
+            self.target_fps,
         )
         return True
 
-    def read_frame(self) -> np.ndarray | None:
-        """Read a single frame from the stream. Returns None if unavailable."""
-        if self._ffmpeg_proc is None or self._ffmpeg_proc.stdout is None:
-            return None
-
+    def _reader_loop(self) -> None:
+        """Continuously read frames from ffmpeg stdout into _latest_frame."""
         width, height = 1280, 720
         frame_size = width * height * 3  # BGR24
 
-        try:
-            raw = self._ffmpeg_proc.stdout.read(frame_size)
-            if len(raw) != frame_size:
+        while self._running:
+            if self._ffmpeg_proc is None or self._ffmpeg_proc.stdout is None:
+                break
+
+            try:
+                raw = self._ffmpeg_proc.stdout.read(frame_size)
+                if len(raw) != frame_size:
+                    # Stream ended or pipe broken
+                    break
+
+                frame = np.frombuffer(raw, dtype=np.uint8).reshape(
+                    (height, width, 3)
+                )
+                with self._lock:
+                    self._latest_frame = frame.copy()
+                    self._frame_seq += 1
+                    self._new_frame_event.set()
+
+            except Exception as e:
+                logger.error("Reader thread error: %s", e)
+                break
+
+        logger.debug("Reader thread exiting")
+
+    def read_frame(self) -> np.ndarray | None:
+        """
+        Non-blocking read: returns the latest unread frame, or None if no
+        new frame is available since the last call.
+        """
+        with self._lock:
+            if self._frame_seq == self._last_read_seq:
                 return None
+            self._last_read_seq = self._frame_seq
+            self._new_frame_event.clear()
+            return self._latest_frame.copy() if self._latest_frame is not None else None
 
-            frame = np.frombuffer(raw, dtype=np.uint8).reshape(
-                (height, width, 3)
-            )
-            with self._lock:
-                self._latest_frame = frame.copy()
-            return frame
-
-        except Exception as e:
-            logger.error("Error reading frame: %s", e)
-            return None
+    def wait_for_frame(self, timeout: float = 0.1) -> np.ndarray | None:
+        """
+        Block until a new frame arrives (or timeout expires), then return it.
+        Uses threading.Event for efficient waiting instead of busy-polling.
+        """
+        self._new_frame_event.wait(timeout=timeout)
+        return self.read_frame()
 
     def get_latest_frame(self) -> np.ndarray | None:
         """Return the most recently captured frame (thread-safe)."""
@@ -226,4 +271,9 @@ class StreamCapture:
         """Stop the stream capture."""
         self._running = False
         self._cleanup()
+        # Wake up any thread waiting on new_frame_event so it can exit
+        self._new_frame_event.set()
+        if self._reader is not None:
+            self._reader.join(timeout=5)
+            self._reader = None
         logger.info("Stream capture stopped for %s", self.channel)

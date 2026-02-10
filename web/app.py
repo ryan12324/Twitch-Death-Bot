@@ -113,8 +113,9 @@ def _detection_thread():
 
         frame = capture.read_frame()
         if frame is None:
-            time.sleep(0.2)
-            continue
+            frame = capture.wait_for_frame(0.1)
+            if frame is None:
+                continue
 
         is_death, confidence = detector.analyze_frame(frame)
         scores = _get_scores(detector)
@@ -292,7 +293,7 @@ def api_start():
     threshold = float(data.get("threshold", 0.80))
     cooldown = int(data.get("cooldown", 15))
     quality = data.get("quality", "720p")
-    capture_interval = float(data.get("capture_interval", 2.0))
+    target_fps = int(data.get("target_fps", 15))
 
     if not channel:
         return jsonify({"error": "Channel name is required"}), 400
@@ -306,7 +307,7 @@ def api_start():
     profile = get_profile(profile_name)
     detector = DeathDetector(profile=profile, threshold=threshold, cooldown=cooldown)
     capture = StreamCapture(
-        channel=channel, quality=quality, capture_interval=capture_interval
+        channel=channel, quality=quality, target_fps=target_fps
     )
 
     if not capture.start():

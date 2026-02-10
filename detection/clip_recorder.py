@@ -27,7 +27,6 @@ class ClipRecorder:
         enabled: bool = True,
         pre_death_seconds: float = 3.0,
         post_death_seconds: float = 2.0,
-        capture_fps: float = 0.5,
         output_dir: Path | None = None,
         output_fps: float = 10.0,
     ):
@@ -36,8 +35,6 @@ class ClipRecorder:
             enabled: Whether clip recording is active.
             pre_death_seconds: Seconds of footage to keep before the death.
             post_death_seconds: Seconds of footage to capture after the death.
-            capture_fps: How many frames per second are being fed in
-                         (should match 1/CAPTURE_INTERVAL).
             output_dir: Where to save clip files.
             output_fps: Playback FPS for saved clips. Frames are duplicated
                         to fill the timeline so clips play at readable speed.
@@ -45,13 +42,13 @@ class ClipRecorder:
         self.enabled = enabled
         self.pre_death_seconds = pre_death_seconds
         self.post_death_seconds = post_death_seconds
-        self.capture_fps = capture_fps
         self.output_fps = output_fps
         self.output_dir = output_dir or CLIPS_DIR
 
-        # Rolling buffer: stores (timestamp, frame) tuples
-        buffer_size = max(1, int(pre_death_seconds * capture_fps))
-        self._buffer: deque[tuple[float, np.ndarray]] = deque(maxlen=buffer_size)
+        # Rolling buffer: stores (timestamp, frame) tuples.
+        # Time-based pruning — no fixed maxlen, entries older than
+        # pre_death_seconds are removed on each feed_frame() call.
+        self._buffer: deque[tuple[float, np.ndarray]] = deque()
         self._lock = threading.Lock()
 
         # Post-death capture state
@@ -79,6 +76,11 @@ class ClipRecorder:
 
         with self._lock:
             self._buffer.append((now, frame.copy()))
+
+            # Prune entries older than pre_death_seconds
+            cutoff = now - self.pre_death_seconds
+            while self._buffer and self._buffer[0][0] < cutoff:
+                self._buffer.popleft()
 
             # If we're capturing post-death frames, collect them
             if self._capturing_post:

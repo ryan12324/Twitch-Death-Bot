@@ -55,11 +55,21 @@ def get_config() -> dict:
         )
         sys.exit(1)
 
+    # TARGET_FPS replaces the old CAPTURE_INTERVAL setting
+    target_fps = int(os.getenv("TARGET_FPS", "15"))
+    if os.getenv("CAPTURE_INTERVAL"):
+        logger.warning(
+            "CAPTURE_INTERVAL is deprecated — use TARGET_FPS instead. "
+            "Ignoring CAPTURE_INTERVAL=%s, using TARGET_FPS=%d.",
+            os.getenv("CAPTURE_INTERVAL"),
+            target_fps,
+        )
+
     return {
         "token": token,
         "channel": channel,
         "game": game,
-        "capture_interval": float(os.getenv("CAPTURE_INTERVAL", "2.0")),
+        "target_fps": target_fps,
         "threshold": float(os.getenv("DETECTION_THRESHOLD", "0.80")),
         "cooldown": int(os.getenv("DEATH_COOLDOWN", "15")),
         "quality": os.getenv("STREAM_QUALITY", "720p"),
@@ -99,8 +109,9 @@ def detection_loop(
 
         frame = capture.read_frame()
         if frame is None:
-            stop_event.wait(0.5)
-            continue
+            frame = capture.wait_for_frame(0.1)
+            if frame is None:
+                continue
 
         # Feed every frame to the clip recorder's rolling buffer
         clip_recorder.feed_frame(frame)
@@ -149,7 +160,7 @@ def main() -> None:
     capture = StreamCapture(
         channel=config["channel"],
         quality=config["quality"],
-        capture_interval=config["capture_interval"],
+        target_fps=config["target_fps"],
     )
 
     clip_output_dir = Path(config["clip_output_dir"]) if config["clip_output_dir"] else None
@@ -157,7 +168,6 @@ def main() -> None:
         enabled=config["clip_enabled"],
         pre_death_seconds=config["clip_pre_seconds"],
         post_death_seconds=config["clip_post_seconds"],
-        capture_fps=1.0 / config["capture_interval"],
         output_dir=clip_output_dir,
         output_fps=config["clip_output_fps"],
     )

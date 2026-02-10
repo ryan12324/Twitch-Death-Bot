@@ -114,7 +114,7 @@ A death is only confirmed after **2 consecutive frames** exceed the confidence t
 | `TWITCH_TOKEN` | (required) | Bot OAuth token |
 | `TWITCH_CHANNEL` | (required) | Channel to monitor |
 | `GAME_PROFILE` | `generic` | Game profile for detection |
-| `CAPTURE_INTERVAL` | `2.0` | Seconds between frame captures |
+| `TARGET_FPS` | `15` | Target frames per second for capture (5-30) |
 | `DETECTION_THRESHOLD` | `0.80` | Confidence threshold (0.0 - 1.0) |
 | `DEATH_COOLDOWN` | `15` | Seconds between death detections |
 | `STREAM_QUALITY` | `720p` | Stream quality for capture |
