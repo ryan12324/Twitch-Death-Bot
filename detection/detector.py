@@ -383,14 +383,20 @@ class DeathDetector:
             self._last_text_boxes = []
             return 0.0
 
-        # Lazy-init EasyOCR reader
+        # Lazy-init PaddleOCR reader
         if not hasattr(self, '_ocr_reader') or self._ocr_reader is None:
             try:
-                import easyocr
-                self._ocr_reader = easyocr.Reader(['en'], gpu=False, verbose=False)
-                logger.info("text_detection: EasyOCR reader initialized")
+                from paddleocr import PaddleOCR
+                self._ocr_reader = PaddleOCR(
+                    ocr_version="PP-OCRv4",
+                    lang="en",
+                    use_angle_cls=False,
+                    use_gpu=False,
+                    show_log=False,
+                )
+                logger.info("text_detection: PaddleOCR reader initialized")
             except ImportError:
-                logger.warning("text_detection: easyocr not installed")
+                logger.warning("text_detection: paddleocr not installed")
                 self._last_text_boxes = []
                 return 0.0
 
@@ -413,12 +419,13 @@ class DeathDetector:
 
         for area, ox, oy in search_areas:
             try:
-                results = self._ocr_reader.readtext(area)
+                raw = self._ocr_reader.ocr(area, cls=False)
+                results = raw[0] if raw and raw[0] else []
             except Exception as e:
                 logger.warning("text_detection: OCR failed: %s", e)
                 continue
 
-            for bbox, text, confidence in results:
+            for bbox, (text, confidence) in results:
                 text_lower = text.lower()
                 matched = any(ind in text_lower for ind in indicators_lower)
                 # Offset bbox to frame coordinates
@@ -491,7 +498,7 @@ class DeathDetector:
         template_score = self._template_match_score(frame, frame_gray)
 
         # --- Expensive: OCR (~1-2s). Gate behind cheaper signals. ---
-        # Only run OCR when at least one cheaper signal shows promise,
+        # Only run OCR when cheaper signals strongly suggest a death,
         # unless text is the only configured signal for this profile.
         has_cheap_signals = bool(
             self.templates or self.profile.dominant_colors
@@ -500,7 +507,7 @@ class DeathDetector:
             or self.profile.fade_to_color is not None
         )
         gate_score = max(template_score, color_score, brightness_score, fade_score)
-        if self.profile.text_indicators and (not has_cheap_signals or gate_score > 0.15):
+        if self.profile.text_indicators and (not has_cheap_signals or gate_score > 0.5):
             text_score = self._text_detection_score(frame)
         else:
             text_score = 0.0
@@ -904,11 +911,12 @@ class DeathDetector:
 
         for area, offset_x, offset_y in search_areas:
             try:
-                results = self._ocr_reader.readtext(area)
+                raw = self._ocr_reader.ocr(area, cls=False)
+                results = raw[0] if raw and raw[0] else []
             except Exception:
                 continue
 
-            for bbox, text, confidence in results:
+            for bbox, (text, confidence) in results:
                 text_lower = text.lower()
                 matched = any(ind in text_lower for ind in indicators_lower)
 
