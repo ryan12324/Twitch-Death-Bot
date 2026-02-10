@@ -4,16 +4,10 @@
   "template_dir": "dark_souls_2",
   "screen_regions": [
     {
-      "x_min": 0.3096,
-      "y_min": 0.4573,
-      "x_max": 0.6959,
-      "y_max": 0.5943
-    },
-    {
-      "x_min": 0.0168,
-      "y_min": 0.4576,
-      "x_max": 0.9948,
-      "y_max": 0.59
+      "x_min": 0.2914,
+      "y_min": 0.4203,
+      "x_max": 0.7072,
+      "y_max": 0.6343
     }
   ],
   "dominant_colors": [
@@ -38,9 +32,9 @@
   "min_brightness": null,
   "cooldown_override": null,
   "weights": {
-    "template": 5,
-    "text": 10,
-    "color": 2,
+    "template": 10,
+    "text": 0,
+    "color": 0,
     "brightness": 0,
     "fade": 0,
     "scene_change": 0
