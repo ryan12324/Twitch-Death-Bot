@@ -391,13 +391,14 @@ class DeathDetector:
         # Lazy-init PaddleOCR reader
         if not hasattr(self, '_ocr_reader') or self._ocr_reader is None:
             try:
+                import os
+                os.environ.setdefault("PADDLE_PDX_DISABLE_MODEL_SOURCE_CHECK", "True")
                 from paddleocr import PaddleOCR
                 self._ocr_reader = PaddleOCR(
-                    ocr_version="PP-OCRv4",
                     lang="en",
-                    use_angle_cls=False,
-                    use_gpu=False,
-                    show_log=False,
+                    use_doc_orientation_classify=False,
+                    use_doc_unwarping=False,
+                    use_textline_orientation=False,
                 )
                 logger.info("text_detection: PaddleOCR reader initialized")
             except ImportError:
@@ -424,13 +425,19 @@ class DeathDetector:
 
         for area, ox, oy in search_areas:
             try:
-                raw = self._ocr_reader.ocr(area, cls=False)
-                results = raw[0] if raw and raw[0] else []
+                raw = self._ocr_reader.predict(input=area)
+                results = []
+                if raw:
+                    data = raw[0].json
+                    polys = data.get("rec_polys", [])
+                    texts = data.get("rec_texts", [])
+                    scores = data.get("rec_scores", [])
+                    results = list(zip(polys, texts, scores))
             except Exception as e:
                 logger.warning("text_detection: OCR failed: %s", e)
                 continue
 
-            for bbox, (text, confidence) in results:
+            for bbox, text, confidence in results:
                 text_lower = text.lower()
                 matched = any(ind in text_lower for ind in indicators_lower)
                 # Offset bbox to frame coordinates
@@ -892,13 +899,14 @@ class DeathDetector:
 
         if not hasattr(self, '_ocr_reader') or self._ocr_reader is None:
             try:
+                import os
+                os.environ.setdefault("PADDLE_PDX_DISABLE_MODEL_SOURCE_CHECK", "True")
                 from paddleocr import PaddleOCR
                 self._ocr_reader = PaddleOCR(
-                    ocr_version="PP-OCRv4",
                     lang="en",
-                    use_angle_cls=False,
-                    use_gpu=False,
-                    show_log=False,
+                    use_doc_orientation_classify=False,
+                    use_doc_unwarping=False,
+                    use_textline_orientation=False,
                 )
             except ImportError:
                 cv2.putText(
@@ -926,12 +934,18 @@ class DeathDetector:
 
         for area, offset_x, offset_y in search_areas:
             try:
-                raw = self._ocr_reader.ocr(area, cls=False)
-                results = raw[0] if raw and raw[0] else []
+                raw = self._ocr_reader.predict(input=area)
+                results = []
+                if raw:
+                    data = raw[0].json
+                    polys = data.get("rec_polys", [])
+                    texts = data.get("rec_texts", [])
+                    scores = data.get("rec_scores", [])
+                    results = list(zip(polys, texts, scores))
             except Exception:
                 continue
 
-            for bbox, (text, confidence) in results:
+            for bbox, text, confidence in results:
                 text_lower = text.lower()
                 matched = any(ind in text_lower for ind in indicators_lower)
 
