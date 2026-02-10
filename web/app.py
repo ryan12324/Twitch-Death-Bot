@@ -95,6 +95,8 @@ def _get_scores(detector: DeathDetector) -> dict:
 def _detection_thread():
     """Background thread that reads frames and runs detection."""
     logger.info("Detection thread started")
+    from collections import deque
+    fps_timestamps: deque[float] = deque(maxlen=60)
 
     while not stop_event.is_set():
         with state_lock:
@@ -231,6 +233,19 @@ def _detection_thread():
         cv2.putText(
             display, f"CONF: {conf:.3f} (thr: {threshold})",
             (bar_x + 4, y_offset + 18), cv2.FONT_HERSHEY_SIMPLEX, 0.4, (255, 255, 255), 1,
+        )
+
+        # ── FPS counter ──
+        fps_timestamps.append(time.time())
+        if len(fps_timestamps) >= 2:
+            elapsed = fps_timestamps[-1] - fps_timestamps[0]
+            fps = (len(fps_timestamps) - 1) / elapsed if elapsed > 0 else 0
+        else:
+            fps = 0
+        y_offset += 8
+        cv2.putText(
+            display, f"{fps:.1f} fps",
+            (bar_x, y_offset + 14), cv2.FONT_HERSHEY_SIMPLEX, 0.4, (180, 180, 180), 1,
         )
 
         # ── Death flash ──
