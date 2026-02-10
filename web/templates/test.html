@@ -78,7 +78,6 @@
     background: #000;
     position: relative;
   }
-  .video-area video,
   .video-area img {
     width: 100%;
     height: 100%;
@@ -425,7 +424,6 @@
       <svg width="48" height="48" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path d="M15.75 10.5l4.72-4.72a.75.75 0 011.28.53v11.38a.75.75 0 01-1.28.53l-4.72-4.72M4.5 18.75h9a2.25 2.25 0 002.25-2.25v-9A2.25 2.25 0 0013.5 5.25h-9A2.25 2.25 0 002.25 7.5v9a2.25 2.25 0 002.25 2.25z"/></svg>
       <span>Connect to a stream or upload an image to begin</span>
     </div>
-    <video id="videoPlayer" muted playsinline style="display:none"></video>
     <img id="videoFeed" src="" style="display:none">
 
     <div class="debug-gallery" id="debugGallery" style="display:none">
@@ -568,19 +566,7 @@ document.querySelectorAll('.tab').forEach(tab => {
 
 let pollInterval = null;
 let videoWs = null;
-let mediaSource = null;
-let sourceBuffer = null;
-let segmentQueue = [];
-let mseSupported = false;
-let mseMaintTimer = null;
-
-// Check MSE + codec support
-const MSE_CODEC = 'video/mp4; codecs="avc1.42E01E"';
-try {
-  mseSupported = 'MediaSource' in window && MediaSource.isTypeSupported(MSE_CODEC);
-} catch (e) {
-  mseSupported = false;
-}
+let prevBlobUrl = null;
 
 async function startDetection() {
   const channel = document.getElementById('channelInput').value.trim();
@@ -623,147 +609,56 @@ async function startDetection() {
   document.getElementById('statusBadge').textContent = 'Live';
   document.getElementById('stopBtn').disabled = false;
 
-  if (mseSupported) {
-    startMSEStream();
-  } else {
-    // MJPEG fallback
-    document.getElementById('videoFeed').style.display = 'block';
-    document.getElementById('videoFeed').src = '/video_feed?' + Date.now();
-  }
+  // Start JPEG-over-WebSocket stream
+  startVideoWS();
 
   // Start polling status
   if (pollInterval) clearInterval(pollInterval);
   pollInterval = setInterval(pollStatus, 500);
 }
 
-function startMSEStream() {
-  const video = document.getElementById('videoPlayer');
-  video.style.display = 'block';
-  document.getElementById('videoFeed').style.display = 'none';
+function startVideoWS() {
+  const img = document.getElementById('videoFeed');
+  img.style.display = 'block';
 
-  mediaSource = new MediaSource();
-  video.src = URL.createObjectURL(mediaSource);
+  const wsProto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+  videoWs = new WebSocket(wsProto + '//' + location.host + '/ws/video');
+  videoWs.binaryType = 'blob';
 
-  mediaSource.addEventListener('sourceopen', () => {
-    try {
-      sourceBuffer = mediaSource.addSourceBuffer(MSE_CODEC);
-    } catch (e) {
-      console.error('Failed to create SourceBuffer:', e);
-      fallbackToMJPEG();
-      return;
-    }
+  videoWs.onmessage = (event) => {
+    const url = URL.createObjectURL(event.data);
+    img.src = url;
+    if (prevBlobUrl) URL.revokeObjectURL(prevBlobUrl);
+    prevBlobUrl = url;
+  };
 
-    sourceBuffer.mode = 'segments';
-    segmentQueue = [];
+  videoWs.onerror = () => {
+    // Fall back to MJPEG if WS fails
+    stopVideoWS();
+    img.src = '/video_feed?' + Date.now();
+  };
 
-    // updateend: only flush queued segments — no pruning here
-    sourceBuffer.addEventListener('updateend', () => {
-      if (segmentQueue.length > 0 && !sourceBuffer.updating) {
-        sourceBuffer.appendBuffer(segmentQueue.shift());
-      }
-    });
-
-    // Separate maintenance timer for pruning + live-edge seeking
-    if (mseMaintTimer) clearInterval(mseMaintTimer);
-    mseMaintTimer = setInterval(() => {
-      if (!sourceBuffer || !mediaSource || mediaSource.readyState !== 'open') return;
-      if (sourceBuffer.updating) return;
-
-      // Prune: keep at most 4s behind playhead
-      try {
-        if (video.currentTime > 4 && sourceBuffer.buffered.length > 0) {
-          const pruneEnd = video.currentTime - 4;
-          if (sourceBuffer.buffered.start(0) < pruneEnd) {
-            sourceBuffer.remove(0, pruneEnd);
-            return; // remove is async, skip seek this tick
-          }
-        }
-      } catch (e) { /* ignore */ }
-
-      // Auto-seek to live edge if >1s behind
-      try {
-        if (sourceBuffer.buffered.length > 0) {
-          const liveEdge = sourceBuffer.buffered.end(sourceBuffer.buffered.length - 1);
-          if (liveEdge - video.currentTime > 1) {
-            video.currentTime = liveEdge - 0.05;
-          }
-        }
-      } catch (e) { /* ignore */ }
-    }, 2000);
-
-    // Open WebSocket for fMP4 segments
-    const wsProto = location.protocol === 'https:' ? 'wss:' : 'ws:';
-    videoWs = new WebSocket(wsProto + '//' + location.host + '/ws/video');
-    videoWs.binaryType = 'arraybuffer';
-
-    videoWs.onmessage = (event) => {
-      const data = new Uint8Array(event.data);
-      if (!sourceBuffer || mediaSource.readyState !== 'open') return;
-
-      // Backpressure: if queue is too deep, drop oldest to stay near live
-      if (segmentQueue.length > 15) {
-        segmentQueue.splice(0, segmentQueue.length - 5);
-      }
-
-      if (sourceBuffer.updating || segmentQueue.length > 0) {
-        segmentQueue.push(data);
-      } else {
-        try {
-          sourceBuffer.appendBuffer(data);
-        } catch (e) {
-          segmentQueue.push(data);
-        }
-      }
-
-      // Start playback once we have data
-      if (video.paused) {
-        video.play().catch(() => {});
-      }
-    };
-
-    videoWs.onerror = (e) => {
-      console.error('WebSocket error:', e);
-    };
-
-    videoWs.onclose = () => {
-      console.log('WebSocket closed');
-    };
-  });
+  videoWs.onclose = () => {
+    console.log('Video WebSocket closed');
+  };
 }
 
-function fallbackToMJPEG() {
-  // Clean up MSE
-  cleanupMSE();
-  // Show MJPEG img
-  document.getElementById('videoPlayer').style.display = 'none';
-  document.getElementById('videoFeed').style.display = 'block';
-  document.getElementById('videoFeed').src = '/video_feed?' + Date.now();
-}
-
-function cleanupMSE() {
-  if (mseMaintTimer) { clearInterval(mseMaintTimer); mseMaintTimer = null; }
+function stopVideoWS() {
   if (videoWs) {
     videoWs.close();
     videoWs = null;
   }
-  segmentQueue = [];
-  sourceBuffer = null;
-
-  const video = document.getElementById('videoPlayer');
-  if (mediaSource && mediaSource.readyState === 'open') {
-    try { mediaSource.endOfStream(); } catch (e) { /* ignore */ }
+  if (prevBlobUrl) {
+    URL.revokeObjectURL(prevBlobUrl);
+    prevBlobUrl = null;
   }
-  video.removeAttribute('src');
-  video.load();
-  mediaSource = null;
 }
 
 async function stopDetection() {
   await fetch('/api/stop', {method: 'POST'});
 
   // Clean up video
-  cleanupMSE();
-  document.getElementById('videoPlayer').style.display = 'none';
+  stopVideoWS();
   document.getElementById('videoFeed').style.display = 'none';
   document.getElementById('videoFeed').src = '';
   document.getElementById('placeholder').style.display = '';
@@ -935,7 +830,6 @@ async function analyzeImage(input) {
 
   if (firstKey) {
     document.getElementById('placeholder').style.display = 'none';
-    document.getElementById('videoPlayer').style.display = 'none';
     document.getElementById('videoFeed').style.display = 'none';
     document.getElementById('debugGallery').style.display = 'flex';
     showDebugImage(firstKey);

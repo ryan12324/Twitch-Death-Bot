@@ -8,7 +8,7 @@ Provides a browser-based dashboard to:
   - Tune threshold / cooldown / game profile on the fly
   - View death log and session stats
 
-Video is streamed as H.264 fMP4 via WebSocket + MSE for smooth 30fps playback,
+Video is streamed as JPEG frames via WebSocket for low-latency ~30fps playback,
 while detection runs asynchronously at whatever rate the detector can manage.
 """
 
@@ -37,7 +37,7 @@ from game_profiles.profiles import (
     PROFILES, get_profile, list_profiles,
     profile_to_dict, save_profile, delete_profile, _parse_profile,
 )
-from web.fmp4_encoder import FMP4Encoder
+import queue
 
 PROJECT_ROOT = Path(__file__).parent.parent
 TEMPLATES_DIR = PROJECT_ROOT / "game_profiles" / "templates"
@@ -69,7 +69,8 @@ state = {
     "latest_confidence": 0.0,
     "death_log": [],        # [{time, session_count, total_count, confidence}]
     "frame_count": 0,
-    "encoder": None,
+    "ws_clients": [],       # list[queue.Queue] — JPEG frames pushed to WS viewers
+    "ws_clients_lock": threading.Lock(),
     "overlay_state": {
         "scores": {},
         "confidence": 0.0,
@@ -309,11 +310,12 @@ def _detection_thread():
 
 
 def _video_thread():
-    """Background thread that reads frames at ~30fps, draws overlays, feeds encoder."""
+    """Background thread that reads frames at ~30fps, draws overlays, sends JPEG over WS."""
     logger.info("Video thread started")
     from collections import deque
     fps_timestamps: deque[float] = deque(maxlen=60)
     frame_interval = 1.0 / 30.0
+    target_w, target_h = 1280, 720
 
     while not stop_event.is_set():
         loop_start = time.time()
@@ -321,10 +323,10 @@ def _video_thread():
         with state_lock:
             capture = state["capture"]
             detector = state["detector"]
-            encoder = state["encoder"]
             overlay = dict(state["overlay_state"])
+            clients_lock = state["ws_clients_lock"]
 
-        if capture is None or detector is None or encoder is None:
+        if capture is None or detector is None:
             time.sleep(0.1)
             continue
 
@@ -337,10 +339,10 @@ def _video_thread():
             time.sleep(0.01)
             continue
 
-        # Resize to encoder dimensions if needed
+        # Resize to target dimensions if needed
         fh, fw = frame.shape[:2]
-        if fw != encoder.width or fh != encoder.height:
-            frame = cv2.resize(frame, (encoder.width, encoder.height))
+        if fw != target_w or fh != target_h:
+            frame = cv2.resize(frame, (target_w, target_h))
 
         # Draw overlays using cached detection results
         display = _draw_overlays(frame, overlay, detector)
@@ -352,16 +354,30 @@ def _video_thread():
             fps = (len(fps_timestamps) - 1) / elapsed if elapsed > 0 else 0
         else:
             fps = 0
-        bar_x = encoder.width - 200
-        # Position below the score bars panel
+        bar_x = target_w - 200
         y_fps = 20 + 6 * (18 + 4) + 8 + 24 + 28 + 4
         cv2.putText(
             display, f"{fps:.1f} fps",
             (bar_x, y_fps + 14), cv2.FONT_HERSHEY_SIMPLEX, 0.4, (180, 180, 180), 1,
         )
 
-        # Feed to fMP4 encoder for WebSocket streaming
-        encoder.feed_frame(display)
+        # Encode JPEG once, broadcast to all WS clients + store for MJPEG fallback
+        jpg = _encode_frame_jpg(display)
+        with state_lock:
+            state["latest_frame_jpg"] = jpg
+
+        with clients_lock:
+            for q in state["ws_clients"]:
+                try:
+                    # Non-blocking put; drop if client is behind
+                    if q.full():
+                        try:
+                            q.get_nowait()
+                        except queue.Empty:
+                            pass
+                    q.put_nowait(jpg)
+                except queue.Full:
+                    pass
 
         # Pace to ~30fps
         elapsed = time.time() - loop_start
@@ -427,10 +443,6 @@ def api_start():
     counter = DeathCounter()
     counter.start_session(profile_name)
 
-    # Start fMP4 encoder
-    encoder = FMP4Encoder(width=1280, height=720, fps=30)
-    encoder.start()
-
     with state_lock:
         state["detector"] = detector
         state["capture"] = capture
@@ -442,7 +454,6 @@ def api_start():
         state["running"] = True
         state["death_log"] = []
         state["frame_count"] = 0
-        state["encoder"] = encoder
         state["overlay_state"] = {
             "scores": {},
             "confidence": 0.0,
@@ -585,55 +596,39 @@ def video_feed():
 
 
 # ---------------------------------------------------------------------------
-# WebSocket route for fMP4 video streaming
+# WebSocket route for JPEG video streaming
 # ---------------------------------------------------------------------------
 
 
 @sock.route("/ws/video")
 def ws_video(ws):
-    """WebSocket endpoint: streams fMP4 init segment + media segments to client."""
-    with state_lock:
-        encoder = state.get("encoder")
+    """WebSocket endpoint: streams JPEG frames to client in real time."""
+    client_queue: queue.Queue = queue.Queue(maxsize=3)
 
-    if encoder is None:
-        ws.close()
-        return
+    # Register
+    with state["ws_clients_lock"]:
+        state["ws_clients"].append(client_queue)
 
-    # Wait for the init segment to become available
-    if not encoder.wait_for_init(timeout=10.0):
-        ws.close()
-        return
-
-    # Send init segment first
-    if encoder.init_segment:
-        try:
-            ws.send(encoder.init_segment)
-        except Exception:
-            return
-
-    # Register for media segments
-    client_queue = encoder.register_client()
     try:
         while True:
             try:
-                segment = client_queue.get(timeout=5.0)
+                jpg = client_queue.get(timeout=5.0)
             except Exception:
-                # Check if still running
                 with state_lock:
                     if not state["running"]:
                         break
                 continue
 
-            if segment is None:
-                # Sentinel — encoder stopped
-                break
-
             try:
-                ws.send(segment)
+                ws.send(jpg)
             except Exception:
                 break
     finally:
-        encoder.unregister_client(client_queue)
+        with state["ws_clients_lock"]:
+            try:
+                state["ws_clients"].remove(client_queue)
+            except ValueError:
+                pass
 
 
 # ---------------------------------------------------------------------------
@@ -785,9 +780,6 @@ def _stop_capture() -> dict:
     stop_event.set()
     summary = {}
     with state_lock:
-        if state.get("encoder"):
-            state["encoder"].stop()
-            state["encoder"] = None
         if state["capture"]:
             state["capture"].stop()
             state["capture"] = None
