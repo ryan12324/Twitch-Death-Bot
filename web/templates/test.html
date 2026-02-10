@@ -487,25 +487,6 @@
           <button class="btn btn-danger" id="stopBtn" onclick="stopDetection()" disabled>Stop</button>
         </div>
       </div>
-
-      <div class="panel">
-        <h2>Detection Scores</h2>
-        <div id="scoreBars">
-          <div class="score-bar bar-template"><div class="bar-header"><span class="name">Template</span><span class="value" id="s-template">0.00</span></div><div class="bar-track"><div class="bar-fill" id="b-template" style="width:0%"></div></div></div>
-          <div class="score-bar bar-text"><div class="bar-header"><span class="name">Text</span><span class="value" id="s-text">0.00</span></div><div class="bar-track"><div class="bar-fill" id="b-text" style="width:0%"></div></div></div>
-          <div class="score-bar bar-color"><div class="bar-header"><span class="name">Dominant Color</span><span class="value" id="s-color">0.00</span></div><div class="bar-track"><div class="bar-fill" id="b-color" style="width:0%"></div></div></div>
-          <div class="score-bar bar-brightness"><div class="bar-header"><span class="name">Brightness</span><span class="value" id="s-brightness">0.00</span></div><div class="bar-track"><div class="bar-fill" id="b-brightness" style="width:0%"></div></div></div>
-          <div class="score-bar bar-fade"><div class="bar-header"><span class="name">Fade</span><span class="value" id="s-fade">0.00</span></div><div class="bar-track"><div class="bar-fill" id="b-fade" style="width:0%"></div></div></div>
-          <div class="score-bar bar-scene_change"><div class="bar-header"><span class="name">Scene Change</span><span class="value" id="s-scene_change">0.00</span></div><div class="bar-track"><div class="bar-fill" id="b-scene_change" style="width:0%"></div></div></div>
-          <div style="margin-top:8px"></div>
-          <div class="score-bar bar-confidence"><div class="bar-header"><span class="name">Confidence</span><span class="value" id="s-confidence">0.000</span></div><div class="bar-track"><div class="threshold-marker" id="thresholdMarker" style="left:80%"></div><div class="bar-fill" id="b-confidence" style="width:0%"></div></div></div>
-        </div>
-        <div class="threshold-control">
-          <label style="font-size:12px;color:var(--text-dim)">Threshold</label>
-          <input type="range" id="thresholdSlider" min="0" max="1" step="0.01" value="0.80" oninput="updateThreshold(this.value)">
-          <span class="val" id="thresholdVal">0.80</span>
-        </div>
-      </div>
     </div>
 
     <!-- Tab: Upload image -->
@@ -541,6 +522,26 @@
         <div class="death-log" id="deathLog">
           <div class="death-log-empty">No deaths recorded yet.</div>
         </div>
+      </div>
+    </div>
+
+    <!-- Detection Scores (always visible) -->
+    <div class="panel" style="border-top:1px solid var(--border)">
+      <h2>Detection Scores</h2>
+      <div id="scoreBars">
+        <div class="score-bar bar-template"><div class="bar-header"><span class="name">Template</span><span class="value" id="s-template">0.00</span></div><div class="bar-track"><div class="bar-fill" id="b-template" style="width:0%"></div></div></div>
+        <div class="score-bar bar-text"><div class="bar-header"><span class="name">Text</span><span class="value" id="s-text">0.00</span></div><div class="bar-track"><div class="bar-fill" id="b-text" style="width:0%"></div></div></div>
+        <div class="score-bar bar-color"><div class="bar-header"><span class="name">Dominant Color</span><span class="value" id="s-color">0.00</span></div><div class="bar-track"><div class="bar-fill" id="b-color" style="width:0%"></div></div></div>
+        <div class="score-bar bar-brightness"><div class="bar-header"><span class="name">Brightness</span><span class="value" id="s-brightness">0.00</span></div><div class="bar-track"><div class="bar-fill" id="b-brightness" style="width:0%"></div></div></div>
+        <div class="score-bar bar-fade"><div class="bar-header"><span class="name">Fade</span><span class="value" id="s-fade">0.00</span></div><div class="bar-track"><div class="bar-fill" id="b-fade" style="width:0%"></div></div></div>
+        <div class="score-bar bar-scene_change"><div class="bar-header"><span class="name">Scene Change</span><span class="value" id="s-scene_change">0.00</span></div><div class="bar-track"><div class="bar-fill" id="b-scene_change" style="width:0%"></div></div></div>
+        <div style="margin-top:8px"></div>
+        <div class="score-bar bar-confidence"><div class="bar-header"><span class="name">Confidence</span><span class="value" id="s-confidence">0.000</span></div><div class="bar-track"><div class="threshold-marker" id="thresholdMarker" style="left:80%"></div><div class="bar-fill" id="b-confidence" style="width:0%"></div></div></div>
+      </div>
+      <div class="threshold-control">
+        <label style="font-size:12px;color:var(--text-dim)">Threshold</label>
+        <input type="range" id="thresholdSlider" min="0" max="1" step="0.01" value="0.80" oninput="updateThreshold(this.value)">
+        <span class="val" id="thresholdVal">0.80</span>
       </div>
     </div>
   </div>
@@ -722,15 +723,32 @@ async function analyzeImage(input) {
   resultEl.classList.add('show');
 
   const verdictEl = document.getElementById('uploadVerdict');
+  const confVal = (data.scores || {}).confidence || 0;
   if (data.is_death) {
-    verdictEl.innerHTML = '<span class="death-yes">DEATH DETECTED</span>';
+    verdictEl.innerHTML = `<span class="death-yes">DEATH DETECTED</span> <span style="font-size:13px;color:var(--text-dim)">confidence: ${confVal.toFixed(4)}</span>`;
   } else {
-    verdictEl.innerHTML = '<span class="death-no">No death detected</span>';
+    verdictEl.innerHTML = `<span class="death-no">No death detected</span> <span style="font-size:13px;color:var(--text-dim)">confidence: ${confVal.toFixed(4)}</span>`;
   }
 
-  const scoresEl = document.getElementById('uploadScores');
+  // Update sidebar score bars (same display as live stream)
   const s = data.scores || {};
   const uploadConfigured = s.configured || [];
+  for (const key of ['template', 'text', 'color', 'brightness', 'fade', 'scene_change']) {
+    const val = s[key] || 0;
+    const el = document.getElementById('s-' + key);
+    const bar = document.getElementById('b-' + key);
+    const barParent = bar ? bar.closest('.score-bar') : null;
+    const isConfigured = key === 'scene_change' || uploadConfigured.length === 0 || uploadConfigured.includes(key);
+    if (barParent) barParent.classList.toggle('unconfigured', !isConfigured);
+    if (el) el.textContent = isConfigured ? val.toFixed(4) : '(not configured)';
+    if (bar) bar.style.width = isConfigured ? (val * 100) + '%' : '0%';
+  }
+  const conf = s.confidence || 0;
+  document.getElementById('s-confidence').textContent = conf.toFixed(4);
+  document.getElementById('b-confidence').style.width = (conf * 100) + '%';
+
+  // Also show scores in the upload result panel
+  const scoresEl = document.getElementById('uploadScores');
   scoresEl.innerHTML = Object.entries(s)
     .filter(([k]) => k !== 'configured')
     .map(([k, v]) => {
