@@ -198,7 +198,7 @@ def _detection_thread():
         threshold = detector.threshold
 
         # Single ROI-based alpha blend for the entire panel background
-        panel_h = len(bar_items) * (bar_h + 4) + 8 + 24
+        panel_h = len(bar_items) * (bar_h + 4) + 8 + 24 + 22
         px1 = max(0, bar_x - 4)
         py1 = max(0, y_start - 4)
         px2 = min(w, bar_x + bar_w + 4)
@@ -242,7 +242,7 @@ def _detection_thread():
             fps = (len(fps_timestamps) - 1) / elapsed if elapsed > 0 else 0
         else:
             fps = 0
-        y_offset += 8
+        y_offset += 28
         cv2.putText(
             display, f"{fps:.1f} fps",
             (bar_x, y_offset + 14), cv2.FONT_HERSHEY_SIMPLEX, 0.4, (180, 180, 180), 1,
