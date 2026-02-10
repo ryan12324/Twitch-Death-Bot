@@ -4,10 +4,10 @@
   "template_dir": "dark_souls_2",
   "screen_regions": [
     {
-      "x_min": 0.2914,
-      "y_min": 0.4203,
-      "x_max": 0.7072,
-      "y_max": 0.6343
+      "x_min": 0.0541,
+      "y_min": 0.3135,
+      "x_max": 0.8874,
+      "y_max": 0.9962
     }
   ],
   "dominant_colors": [
@@ -24,7 +24,18 @@
       ]
     }
   ],
-  "fade_to_color": null,
+  "fade_to_color": {
+    "lower": [
+      0,
+      0,
+      0
+    ],
+    "upper": [
+      31,
+      34,
+      34
+    ]
+  },
   "text_indicators": [
     "YOU DIED"
   ],
@@ -34,7 +45,7 @@
   "weights": {
     "template": 10,
     "text": 0,
-    "color": 3,
+    "color": 0,
     "brightness": 0,
     "fade": 0,
     "scene_change": 0
