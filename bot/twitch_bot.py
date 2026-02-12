@@ -42,6 +42,9 @@ class DeathBot(commands.Bot):
     async def event_ready(self) -> None:
         logger.info("Bot connected as %s", self.nick)
         logger.info("Monitoring channel: %s", self.channel_name)
+        channel = self.get_channel(self.channel_name)
+        if channel:
+            await channel.send("Death counter bot is now online! Type !deaths to check the count.")
 
     async def event_message(self, message) -> None:
         if message.echo:

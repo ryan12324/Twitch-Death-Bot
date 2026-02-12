@@ -1,6 +1,6 @@
 opencv-python-headless>=4.8.0
 numpy>=1.24.0
-twitchio>=2.6.0
+twitchio>=2.6.0,<3.0.0
 streamlink>=6.0.0
 Pillow>=10.0.0
 python-dotenv>=1.0.0

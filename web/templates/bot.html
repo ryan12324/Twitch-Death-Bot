@@ -807,7 +807,7 @@
     <div class="detect-game-row">
       <div class="form-row">
         <label>Twitch Channel</label>
-        <input type="text" id="formChannel" placeholder="e.g. shroud">
+        <input type="text" id="formChannel" placeholder="e.g. shroud" value="{{ default_channel }}">
       </div>
       <button class="btn btn-secondary btn-sm" onclick="detectGame()" id="detectGameBtn" style="margin-bottom:14px">Detect Game</button>
     </div>
@@ -860,7 +860,7 @@
 
     <div class="form-row">
       <label>Twitch Token (optional, falls back to TWITCH_TOKEN env)</label>
-      <input type="password" id="formToken" placeholder="oauth:...">
+      <input type="password" id="formToken" placeholder="oauth:..." value="{{ default_token }}">
     </div>
 
     <div class="form-actions">
@@ -894,7 +894,7 @@
     <div class="sidebar">
       <!-- Session info + back button -->
       <div class="session-info-bar">
-        <button class="btn btn-secondary btn-sm" onclick="stopAndReturn()" style="padding:5px 10px">&#8592; Back</button>
+        <button class="btn btn-secondary btn-sm" onclick="backToList()" style="padding:5px 10px">&#8592; Back</button>
         <span class="channel-name" id="sessionChannel"></span>
         <span class="profile-badge" id="sessionProfile"></span>
         <div style="flex:1"></div>
@@ -1307,6 +1307,13 @@ async function stopBot() {
 
 async function stopAndReturn() {
   await stopBot();
+  showListView();
+}
+
+function backToList() {
+  stopVideoWS();
+  disconnectChat();
+  if (pollInterval) { clearInterval(pollInterval); pollInterval = null; }
   showListView();
 }
 
