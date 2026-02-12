@@ -894,7 +894,7 @@
     <div class="sidebar">
       <!-- Session info + back button -->
       <div class="session-info-bar">
-        <button class="btn btn-secondary btn-sm" onclick="stopAndReturn()" style="padding:5px 10px">&#8592; Back</button>
+        <button class="btn btn-secondary btn-sm" onclick="backToList()" style="padding:5px 10px">&#8592; Back</button>
         <span class="channel-name" id="sessionChannel"></span>
         <span class="profile-badge" id="sessionProfile"></span>
         <div style="flex:1"></div>
@@ -1307,6 +1307,13 @@ async function stopBot() {
 
 async function stopAndReturn() {
   await stopBot();
+  showListView();
+}
+
+function backToList() {
+  stopVideoWS();
+  disconnectChat();
+  if (pollInterval) { clearInterval(pollInterval); pollInterval = null; }
   showListView();
 }
 
