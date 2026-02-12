@@ -49,5 +49,6 @@
     "brightness": 0,
     "fade": 0,
     "scene_change": 0
-  }
+  },
+  "twitch_game_id": "29433"
 }

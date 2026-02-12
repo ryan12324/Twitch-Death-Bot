@@ -40,6 +40,7 @@ from detection.counter import DeathCounter
 from detection.death_db import DeathDatabase
 from detection.detector import DeathDetector
 from detection.stream_capture import StreamCapture
+from bot.twitch_api import get_channel_game, match_profile_by_game_id
 from game_profiles.profiles import (
     PROFILES, get_profile, list_profiles,
     profile_to_dict, save_profile, delete_profile, _parse_profile,
@@ -1245,6 +1246,71 @@ def api_bot_clip_file(filename):
     if not CLIPS_DIR.exists():
         return jsonify({"error": "No clips directory"}), 404
     return send_from_directory(str(CLIPS_DIR), filename)
+
+
+# ---------------------------------------------------------------------------
+# Streamer config CRUD + game detection
+# ---------------------------------------------------------------------------
+
+
+@app.route("/api/streamers")
+def api_streamers_list():
+    """List all saved streamer configs."""
+    db = state.get("death_db")
+    if not db:
+        return jsonify([])
+    return jsonify(db.get_streamer_configs())
+
+
+@app.route("/api/streamers", methods=["POST"])
+def api_streamers_save():
+    """Create or update a streamer config (upsert by channel)."""
+    db = state.get("death_db")
+    if not db:
+        return jsonify({"error": "Database not available"}), 500
+    data = request.get_json()
+    if not data or not data.get("channel", "").strip():
+        return jsonify({"error": "Channel name is required"}), 400
+    try:
+        saved = db.save_streamer_config(data)
+        return jsonify(saved)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 400
+
+
+@app.route("/api/streamers/<channel>", methods=["DELETE"])
+def api_streamers_delete(channel):
+    """Delete a streamer config."""
+    db = state.get("death_db")
+    if not db:
+        return jsonify({"error": "Database not available"}), 500
+    if db.delete_streamer_config(channel):
+        return jsonify({"status": "deleted"})
+    return jsonify({"error": "Streamer not found"}), 404
+
+
+@app.route("/api/twitch/game/<channel>")
+def api_twitch_game(channel):
+    """Detect what game a channel is playing via Twitch Helix API."""
+    client_id = request.args.get("client_id", "") or os.getenv("TWITCH_CLIENT_ID", "")
+    token = request.args.get("token", "") or os.getenv("TWITCH_TOKEN", "")
+
+    if not client_id or not token:
+        return jsonify({
+            "error": "TWITCH_CLIENT_ID and TWITCH_TOKEN are required "
+                     "(set as env vars or pass as query params)"
+        }), 400
+
+    result = get_channel_game(channel, client_id, token)
+    if result is None:
+        return jsonify({"game_id": None, "game_name": None, "suggested_profile": None})
+
+    suggested = match_profile_by_game_id(result["game_id"])
+    return jsonify({
+        "game_id": result["game_id"],
+        "game_name": result["game_name"],
+        "suggested_profile": suggested,
+    })
 
 
 # ---------------------------------------------------------------------------

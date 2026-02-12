@@ -64,6 +64,8 @@ class GameProfile:
     text_indicators: list[str] = field(default_factory=list)
     # Per-signal weights for confidence calculation
     weights: dict[str, float] = field(default_factory=dict)
+    # Twitch game category ID for auto-detection
+    twitch_game_id: str = ""
 
 
 # ---------------------------------------------------------------------------
@@ -99,6 +101,7 @@ def _parse_profile(data: dict) -> GameProfile:
         cooldown_override=data.get("cooldown_override"),
         text_indicators=data.get("text_indicators", []),
         weights=data.get("weights", {}),
+        twitch_game_id=data.get("twitch_game_id", ""),
     )
 
 
@@ -122,6 +125,7 @@ def profile_to_dict(profile: GameProfile) -> dict:
         "cooldown_override": profile.cooldown_override,
         "text_indicators": profile.text_indicators,
         "weights": profile.weights,
+        "twitch_game_id": profile.twitch_game_id,
     }
 
 

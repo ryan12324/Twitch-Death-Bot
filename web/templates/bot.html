@@ -12,11 +12,16 @@
     --border: #2f2f35;
     --text: #efeff1;
     --text-dim: #adadb8;
+    --text-muted: #636370;
     --accent: #9147ff;
     --accent-hover: #772ce8;
+    --accent-dim: rgba(145, 71, 255, 0.12);
     --red: #ff4444;
+    --red-dim: rgba(255, 68, 68, 0.12);
     --green: #00c853;
+    --green-dim: rgba(0, 200, 83, 0.12);
     --yellow: #ffc107;
+    --yellow-dim: rgba(255, 193, 7, 0.12);
   }
   * { box-sizing: border-box; margin: 0; padding: 0; }
   body {
@@ -63,8 +68,271 @@
   .status-badge.offline { background: var(--surface2); color: var(--text-dim); }
   .status-badge.live { background: var(--red); color: white; }
 
-  /* Layout */
-  .main {
+  .frame-counter {
+    font-size: 11px;
+    color: var(--text-dim);
+    text-align: right;
+    padding: 4px 0;
+  }
+
+  /* ================================================================
+     VIEW 1: STREAMER LIST
+     ================================================================ */
+  .list-view {
+    padding: 32px;
+    max-width: 1200px;
+    margin: 0 auto;
+    min-height: calc(100vh - 53px);
+  }
+  .list-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 24px;
+  }
+  .list-header h1 {
+    font-size: 22px;
+    font-weight: 700;
+  }
+
+  /* Streamer cards grid */
+  .streamer-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+    gap: 16px;
+  }
+  .streamer-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 20px;
+    cursor: pointer;
+    transition: border-color 0.15s, transform 0.15s, box-shadow 0.15s;
+    position: relative;
+  }
+  .streamer-card:hover {
+    border-color: var(--accent);
+    transform: translateY(-2px);
+    box-shadow: 0 4px 20px rgba(145, 71, 255, 0.1);
+  }
+  .streamer-card .card-top {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 14px;
+  }
+  .streamer-card .card-avatar {
+    width: 44px;
+    height: 44px;
+    border-radius: 50%;
+    background: var(--accent-dim);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 20px;
+    font-weight: 700;
+    color: var(--accent);
+    flex-shrink: 0;
+    text-transform: uppercase;
+  }
+  .streamer-card .card-name {
+    font-size: 17px;
+    font-weight: 700;
+    line-height: 1.2;
+  }
+  .streamer-card .card-profile {
+    font-size: 12px;
+    color: var(--text-dim);
+    margin-top: 2px;
+  }
+  .streamer-card .card-details {
+    display: flex;
+    gap: 12px;
+    flex-wrap: wrap;
+  }
+  .streamer-card .card-tag {
+    font-size: 11px;
+    padding: 3px 8px;
+    border-radius: 4px;
+    background: var(--surface2);
+    color: var(--text-dim);
+    font-weight: 500;
+  }
+  .streamer-card .card-actions {
+    position: absolute;
+    top: 12px;
+    right: 12px;
+    display: flex;
+    gap: 4px;
+    opacity: 0;
+    transition: opacity 0.15s;
+  }
+  .streamer-card:hover .card-actions { opacity: 1; }
+  .card-action-btn {
+    width: 28px;
+    height: 28px;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    background: var(--surface);
+    color: var(--text-dim);
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 13px;
+    transition: all 0.12s;
+  }
+  .card-action-btn:hover { border-color: var(--text-dim); color: var(--text); background: var(--surface2); }
+  .card-action-btn.danger:hover { border-color: var(--red); color: var(--red); background: var(--red-dim); }
+
+  /* New streamer card (dashed) */
+  .new-streamer-card {
+    background: transparent;
+    border: 2px dashed var(--border);
+    border-radius: 10px;
+    padding: 20px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
+    color: var(--text-dim);
+    font-size: 14px;
+    font-weight: 600;
+    transition: all 0.15s;
+    min-height: 130px;
+  }
+  .new-streamer-card:hover {
+    border-color: var(--accent);
+    color: var(--accent);
+    background: var(--accent-dim);
+  }
+  .new-streamer-card svg { flex-shrink: 0; }
+
+  /* Empty state */
+  .empty-state {
+    text-align: center;
+    padding: 60px 20px;
+    color: var(--text-dim);
+  }
+  .empty-state svg { opacity: 0.3; margin-bottom: 16px; }
+  .empty-state h2 { font-size: 18px; margin-bottom: 8px; color: var(--text); }
+  .empty-state p { font-size: 14px; margin-bottom: 20px; }
+
+  /* ================================================================
+     STREAMER FORM (inline modal-style)
+     ================================================================ */
+  .form-overlay {
+    display: none;
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,0.6);
+    z-index: 100;
+    align-items: center;
+    justify-content: center;
+  }
+  .form-overlay.show { display: flex; }
+  .streamer-form {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 24px;
+    width: 480px;
+    max-width: 95vw;
+    max-height: 90vh;
+    overflow-y: auto;
+  }
+  .streamer-form h2 {
+    font-size: 17px;
+    margin-bottom: 20px;
+  }
+  .form-row {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    margin-bottom: 14px;
+  }
+  .form-row label {
+    font-size: 12px;
+    color: var(--text-dim);
+    font-weight: 500;
+  }
+  .form-row input, .form-row select {
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 8px 12px;
+    color: var(--text);
+    font-size: 14px;
+    outline: none;
+    font-family: inherit;
+  }
+  .form-row input:focus, .form-row select:focus {
+    border-color: var(--accent);
+  }
+  .form-row-inline {
+    display: flex;
+    gap: 12px;
+  }
+  .form-row-inline .form-row { flex: 1; }
+  .detect-game-row {
+    display: flex;
+    align-items: flex-end;
+    gap: 8px;
+    margin-bottom: 14px;
+  }
+  .detect-game-row .form-row { flex: 1; margin-bottom: 0; }
+  .detect-result {
+    font-size: 12px;
+    padding: 8px 12px;
+    background: var(--green-dim);
+    border: 1px solid rgba(0,200,83,0.2);
+    border-radius: 6px;
+    margin-bottom: 14px;
+    display: none;
+  }
+  .detect-result.error {
+    background: var(--yellow-dim);
+    border-color: rgba(255,193,7,0.2);
+    color: var(--yellow);
+  }
+  .detect-result.show { display: block; }
+
+  .btn {
+    padding: 10px 20px;
+    border: none;
+    border-radius: 6px;
+    font-size: 14px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: background 0.15s;
+    font-family: inherit;
+  }
+  .btn-primary { background: var(--accent); color: white; }
+  .btn-primary:hover { background: var(--accent-hover); }
+  .btn-danger { background: var(--red); color: white; }
+  .btn-danger:hover { background: #e03030; }
+  .btn-secondary { background: var(--surface2); color: var(--text); border: 1px solid var(--border); }
+  .btn-secondary:hover { background: var(--border); }
+  .btn-sm { padding: 7px 14px; font-size: 12px; }
+  .btn:disabled { opacity: 0.5; cursor: not-allowed; }
+  .btn-row { display: flex; gap: 8px; }
+  .btn-row .btn { flex: 1; }
+  .form-actions {
+    display: flex;
+    gap: 8px;
+    margin-top: 20px;
+    justify-content: flex-end;
+  }
+  .form-actions .btn { width: auto; }
+
+  /* ================================================================
+     VIEW 2: SESSION (active bot page)
+     ================================================================ */
+  .session-view { display: none; }
+  .session-view.active { display: block; }
+
+  .session-main {
     display: grid;
     grid-template-columns: 1fr 360px;
     gap: 0;
@@ -148,51 +416,6 @@
     margin-bottom: 12px;
   }
 
-  /* Form controls */
-  .form-row {
-    display: flex;
-    flex-direction: column;
-    gap: 6px;
-    margin-bottom: 12px;
-  }
-  .form-row label {
-    font-size: 12px;
-    color: var(--text-dim);
-    font-weight: 500;
-  }
-  .form-row input, .form-row select {
-    background: var(--surface2);
-    border: 1px solid var(--border);
-    border-radius: 6px;
-    padding: 8px 12px;
-    color: var(--text);
-    font-size: 14px;
-    outline: none;
-  }
-  .form-row input:focus, .form-row select:focus {
-    border-color: var(--accent);
-  }
-
-  .btn {
-    padding: 10px 20px;
-    border: none;
-    border-radius: 6px;
-    font-size: 14px;
-    font-weight: 600;
-    cursor: pointer;
-    width: 100%;
-    transition: background 0.15s;
-  }
-  .btn-primary { background: var(--accent); color: white; }
-  .btn-primary:hover { background: var(--accent-hover); }
-  .btn-danger { background: var(--red); color: white; }
-  .btn-danger:hover { background: #e03030; }
-  .btn-secondary { background: var(--surface2); color: var(--text); border: 1px solid var(--border); }
-  .btn:disabled { opacity: 0.5; cursor: not-allowed; }
-
-  .btn-row { display: flex; gap: 8px; }
-  .btn-row .btn { flex: 1; }
-
   /* Score bars */
   .score-bar {
     margin-bottom: 8px;
@@ -262,6 +485,106 @@
     font-variant-numeric: tabular-nums;
   }
 
+  /* Tabs */
+  .tabs {
+    display: flex;
+    border-bottom: 1px solid var(--border);
+  }
+  .tab {
+    flex: 1;
+    padding: 10px;
+    text-align: center;
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+    border-bottom: 2px solid transparent;
+    color: var(--text-dim);
+    transition: all 0.15s;
+    background: none;
+    border-top: none;
+    border-left: none;
+    border-right: none;
+    font-family: inherit;
+  }
+  .tab:hover { color: var(--text); }
+  .tab.active { color: var(--accent); border-bottom-color: var(--accent); }
+  .tab-content { display: none; }
+  .tab-content.active { display: block; }
+
+  /* Toggle switch */
+  .toggle-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 12px;
+  }
+  .toggle-row label {
+    font-size: 12px;
+    color: var(--text-dim);
+    font-weight: 500;
+  }
+  .toggle-switch {
+    position: relative;
+    width: 40px;
+    height: 22px;
+  }
+  .toggle-switch input {
+    opacity: 0;
+    width: 0;
+    height: 0;
+  }
+  .toggle-slider {
+    position: absolute;
+    cursor: pointer;
+    top: 0; left: 0; right: 0; bottom: 0;
+    background: var(--surface2);
+    border-radius: 22px;
+    border: 1px solid var(--border);
+    transition: 0.2s;
+  }
+  .toggle-slider::before {
+    content: "";
+    position: absolute;
+    height: 16px;
+    width: 16px;
+    left: 2px;
+    bottom: 2px;
+    background: var(--text-dim);
+    border-radius: 50%;
+    transition: 0.2s;
+  }
+  .toggle-switch input:checked + .toggle-slider {
+    background: var(--accent);
+    border-color: var(--accent);
+  }
+  .toggle-switch input:checked + .toggle-slider::before {
+    transform: translateX(18px);
+    background: white;
+  }
+
+  /* Session info bar */
+  .session-info-bar {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 10px 16px;
+    background: var(--surface2);
+    border-bottom: 1px solid var(--border);
+    font-size: 13px;
+  }
+  .session-info-bar .channel-name {
+    font-weight: 700;
+    font-size: 15px;
+  }
+  .session-info-bar .profile-badge {
+    padding: 2px 10px;
+    border-radius: 4px;
+    background: var(--accent-dim);
+    color: var(--accent);
+    font-size: 12px;
+    font-weight: 600;
+  }
+
   /* Death log */
   .death-log {
     max-height: 300px;
@@ -322,96 +645,7 @@
   }
   .death-entry .delete-btn:hover { color: var(--red); background: var(--surface2); }
 
-  /* Tabs */
-  .tabs {
-    display: flex;
-    border-bottom: 1px solid var(--border);
-  }
-  .tab {
-    flex: 1;
-    padding: 10px;
-    text-align: center;
-    font-size: 13px;
-    font-weight: 600;
-    cursor: pointer;
-    border-bottom: 2px solid transparent;
-    color: var(--text-dim);
-    transition: all 0.15s;
-    background: none;
-    border-top: none;
-    border-left: none;
-    border-right: none;
-  }
-  .tab:hover { color: var(--text); }
-  .tab.active { color: var(--accent); border-bottom-color: var(--accent); }
-  .tab-content { display: none; }
-  .tab-content.active { display: block; }
-
-  /* Frame count */
-  .frame-counter {
-    font-size: 11px;
-    color: var(--text-dim);
-    text-align: right;
-    padding: 4px 0;
-  }
-
-  /* Toggle switch */
-  .toggle-row {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    margin-bottom: 12px;
-  }
-  .toggle-row label {
-    font-size: 12px;
-    color: var(--text-dim);
-    font-weight: 500;
-  }
-  .toggle-switch {
-    position: relative;
-    width: 40px;
-    height: 22px;
-  }
-  .toggle-switch input {
-    opacity: 0;
-    width: 0;
-    height: 0;
-  }
-  .toggle-slider {
-    position: absolute;
-    cursor: pointer;
-    top: 0; left: 0; right: 0; bottom: 0;
-    background: var(--surface2);
-    border-radius: 22px;
-    border: 1px solid var(--border);
-    transition: 0.2s;
-  }
-  .toggle-slider::before {
-    content: "";
-    position: absolute;
-    height: 16px;
-    width: 16px;
-    left: 2px;
-    bottom: 2px;
-    background: var(--text-dim);
-    border-radius: 50%;
-    transition: 0.2s;
-  }
-  .toggle-switch input:checked + .toggle-slider {
-    background: var(--accent);
-    border-color: var(--accent);
-  }
-  .toggle-switch input:checked + .toggle-slider::before {
-    transform: translateX(18px);
-    background: white;
-  }
-
   /* Chat styles */
-  .chat-container {
-    display: flex;
-    flex-direction: column;
-    height: 100%;
-  }
   .chat-status {
     font-size: 11px;
     padding: 6px 0;
@@ -440,13 +674,8 @@
     line-height: 1.4;
     word-wrap: break-word;
   }
-  .chat-msg .chat-name {
-    font-weight: 700;
-    margin-right: 4px;
-  }
-  .chat-msg .chat-text {
-    color: var(--text);
-  }
+  .chat-msg .chat-name { font-weight: 700; margin-right: 4px; }
+  .chat-msg .chat-text { color: var(--text); }
   .chat-empty {
     color: var(--text-dim);
     font-size: 13px;
@@ -463,14 +692,12 @@
     display: flex;
     align-items: center;
     gap: 10px;
-    padding: 8px 0;
+    padding: 8px 4px;
     border-bottom: 1px solid var(--border);
     font-size: 13px;
     cursor: pointer;
     transition: background 0.1s;
     border-radius: 4px;
-    padding-left: 4px;
-    padding-right: 4px;
   }
   .clip-entry:hover { background: var(--surface2); }
   .clip-entry .clip-num {
@@ -515,6 +742,25 @@
     margin-bottom: 12px;
   }
   .clip-header h2 { margin-bottom: 0; }
+
+  /* Toast notification */
+  .toast {
+    position: fixed;
+    bottom: 24px;
+    right: 24px;
+    padding: 12px 20px;
+    border-radius: 8px;
+    font-size: 13px;
+    font-weight: 600;
+    z-index: 200;
+    transform: translateY(80px);
+    opacity: 0;
+    transition: all 0.3s ease;
+    pointer-events: none;
+  }
+  .toast.show { transform: translateY(0); opacity: 1; }
+  .toast.success { background: var(--green-dim); color: var(--green); border: 1px solid rgba(0,200,83,0.3); }
+  .toast.error { background: var(--red-dim); color: var(--red); border: 1px solid rgba(255,68,68,0.3); }
 </style>
 </head>
 <body>
@@ -531,208 +777,486 @@
   <span class="frame-counter" id="frameCounter"></span>
 </div>
 
-<div class="main">
-  <!-- Video feed -->
-  <div class="video-area" id="videoArea">
-    <div class="video-placeholder" id="placeholder">
-      <svg width="48" height="48" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path d="M15.75 10.5l4.72-4.72a.75.75 0 011.28.53v11.38a.75.75 0 01-1.28.53l-4.72-4.72M4.5 18.75h9a2.25 2.25 0 002.25-2.25v-9A2.25 2.25 0 0013.5 5.25h-9A2.25 2.25 0 002.25 7.5v9a2.25 2.25 0 002.25 2.25z"/></svg>
-      <span>Enter a channel and click Start to begin</span>
-    </div>
-    <img id="videoFeed" src="" style="display:none">
-
-    <div class="death-overlay" id="deathOverlay" style="display:none">
-      <div class="count" id="sessionDeaths">0</div>
-      <div class="label">Deaths this stream</div>
-      <div class="total" id="totalDeaths">0 all-time</div>
-    </div>
+<!-- ================================================================
+     VIEW 1: STREAMER LIST
+     ================================================================ -->
+<div class="list-view" id="listView">
+  <div class="list-header">
+    <h1>Streamers</h1>
+    <button class="btn btn-primary" onclick="openStreamerForm()">+ New Streamer</button>
   </div>
 
-  <!-- Sidebar -->
-  <div class="sidebar">
-    <div class="tabs">
-      <button class="tab active" data-tab="stream">Stream</button>
-      <button class="tab" data-tab="chat">Chat</button>
-      <button class="tab" data-tab="clips">Clips</button>
-      <button class="tab" data-tab="log">Deaths</button>
+  <div id="streamerGrid" class="streamer-grid">
+    <!-- Cards rendered by JS -->
+  </div>
+
+  <div id="emptyState" class="empty-state" style="display:none">
+    <svg width="56" height="56" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path d="M15.75 10.5l4.72-4.72a.75.75 0 011.28.53v11.38a.75.75 0 01-1.28.53l-4.72-4.72M4.5 18.75h9a2.25 2.25 0 002.25-2.25v-9A2.25 2.25 0 0013.5 5.25h-9A2.25 2.25 0 002.25 7.5v9a2.25 2.25 0 002.25 2.25z"/></svg>
+    <h2>No streamers configured</h2>
+    <p>Add a streamer to get started with death detection.</p>
+    <button class="btn btn-primary" onclick="openStreamerForm()">+ Add Your First Streamer</button>
+  </div>
+</div>
+
+<!-- Streamer Form Overlay -->
+<div class="form-overlay" id="formOverlay" onclick="if(event.target===this)closeStreamerForm()">
+  <div class="streamer-form">
+    <h2 id="formTitle">New Streamer</h2>
+    <input type="hidden" id="formEditChannel" value="">
+
+    <div class="detect-game-row">
+      <div class="form-row">
+        <label>Twitch Channel</label>
+        <input type="text" id="formChannel" placeholder="e.g. shroud">
+      </div>
+      <button class="btn btn-secondary btn-sm" onclick="detectGame()" id="detectGameBtn" style="margin-bottom:14px">Detect Game</button>
+    </div>
+    <div class="detect-result" id="detectResult"></div>
+
+    <div class="form-row">
+      <label>Game Profile</label>
+      <select id="formProfile">
+        {% for p in profiles %}
+        <option value="{{ p }}" {{ 'selected' if p == 'elden_ring' else '' }}>{{ p }}</option>
+        {% endfor %}
+      </select>
     </div>
 
-    <!-- Tab: Stream controls -->
-    <div class="tab-content active" id="tab-stream">
-      <div class="panel">
-        <h2>Bot Controls</h2>
-        <div class="form-row">
-          <label>Twitch Channel</label>
-          <input type="text" id="channelInput" placeholder="e.g. shroud">
-        </div>
-        <div class="form-row">
-          <label>Game Profile</label>
-          <select id="profileSelect">
-            {% for p in profiles %}
-            <option value="{{ p }}" {{ 'selected' if p == 'elden_ring' else '' }}>{{ p }}</option>
-            {% endfor %}
-          </select>
-        </div>
-        <div class="form-row">
-          <label>Stream Quality</label>
-          <select id="qualitySelect">
-            <option value="best">best</option>
-            <option value="1080p60">1080p60</option>
-            <option value="1080p">1080p</option>
-            <option value="720p60">720p60</option>
-            <option value="720p" selected>720p</option>
-            <option value="480p">480p</option>
-            <option value="worst">worst</option>
-          </select>
-        </div>
-        <div class="form-row">
-          <label>Target FPS</label>
-          <select id="fpsSelect">
-            <option value="5">5 (low CPU)</option>
-            <option value="10">10</option>
-            <option value="15" selected>15 (recommended)</option>
-            <option value="24">24</option>
-            <option value="30">30 (full rate)</option>
-          </select>
-        </div>
-        <div class="form-row">
-          <label>Cooldown (seconds)</label>
-          <input type="number" id="cooldownInput" value="15" min="1" max="120">
-        </div>
-        <div class="form-row">
-          <label>Twitch Token (optional, falls back to TWITCH_TOKEN env)</label>
-          <input type="password" id="twitchTokenInput" placeholder="oauth:...">
-        </div>
-        <div class="toggle-row">
-          <label>Death Announcements</label>
-          <label class="toggle-switch">
-            <input type="checkbox" id="messagesToggle" checked onchange="toggleMessages()">
-            <span class="toggle-slider"></span>
-          </label>
-        </div>
-        <div class="btn-row">
-          <button class="btn btn-primary" id="startBtn" onclick="startBot()">Start</button>
-          <button class="btn btn-danger" id="stopBtn" onclick="stopBot()" disabled>Stop</button>
-        </div>
+    <div class="form-row-inline">
+      <div class="form-row">
+        <label>Threshold</label>
+        <input type="number" id="formThreshold" value="0.80" min="0" max="1" step="0.01">
+      </div>
+      <div class="form-row">
+        <label>Cooldown (sec)</label>
+        <input type="number" id="formCooldown" value="15" min="1" max="120">
       </div>
     </div>
 
-    <!-- Tab: Chat -->
-    <div class="tab-content" id="tab-chat">
-      <div class="panel" style="display:flex;flex-direction:column;height:calc(100vh - 53px - 42px - 33px)">
-        <div class="chat-status" id="chatStatus">
-          <span class="dot disconnected" id="chatDot"></span>
-          <span id="chatStatusText">Not connected</span>
-        </div>
-        <div class="chat-messages" id="chatMessages">
-          <div class="chat-empty">Chat messages will appear here when connected.</div>
-        </div>
+    <div class="form-row-inline">
+      <div class="form-row">
+        <label>Stream Quality</label>
+        <select id="formQuality">
+          <option value="best">best</option>
+          <option value="1080p60">1080p60</option>
+          <option value="1080p">1080p</option>
+          <option value="720p60">720p60</option>
+          <option value="720p" selected>720p</option>
+          <option value="480p">480p</option>
+          <option value="worst">worst</option>
+        </select>
+      </div>
+      <div class="form-row">
+        <label>Target FPS</label>
+        <select id="formFps">
+          <option value="5">5 (low CPU)</option>
+          <option value="10">10</option>
+          <option value="15" selected>15 (recommended)</option>
+          <option value="24">24</option>
+          <option value="30">30 (full rate)</option>
+        </select>
       </div>
     </div>
 
-    <!-- Tab: Clips -->
-    <div class="tab-content" id="tab-clips">
-      <div class="panel">
-        <div class="clip-header">
-          <h2>Saved Clips</h2>
-          <button class="btn btn-secondary" style="width:auto;padding:6px 12px;font-size:12px" onclick="refreshClips()">Refresh</button>
-        </div>
-        <div class="clip-player" id="clipPlayer">
-          <video id="clipVideo" controls></video>
-        </div>
-        <div class="clip-list" id="clipList">
-          <div class="clip-empty">No clips recorded yet.</div>
-        </div>
+    <div class="form-row">
+      <label>Twitch Token (optional, falls back to TWITCH_TOKEN env)</label>
+      <input type="password" id="formToken" placeholder="oauth:...">
+    </div>
+
+    <div class="form-actions">
+      <button class="btn btn-secondary" onclick="closeStreamerForm()">Cancel</button>
+      <button class="btn btn-primary" onclick="saveStreamer()">Save Streamer</button>
+    </div>
+  </div>
+</div>
+
+<!-- ================================================================
+     VIEW 2: SESSION
+     ================================================================ -->
+<div class="session-view" id="sessionView">
+  <div class="session-main">
+    <!-- Video feed -->
+    <div class="video-area" id="videoArea">
+      <div class="video-placeholder" id="placeholder">
+        <svg width="48" height="48" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path d="M15.75 10.5l4.72-4.72a.75.75 0 011.28.53v11.38a.75.75 0 01-1.28.53l-4.72-4.72M4.5 18.75h9a2.25 2.25 0 002.25-2.25v-9A2.25 2.25 0 0013.5 5.25h-9A2.25 2.25 0 002.25 7.5v9a2.25 2.25 0 002.25 2.25z"/></svg>
+        <span>Connecting to stream...</span>
+      </div>
+      <img id="videoFeed" src="" style="display:none">
+
+      <div class="death-overlay" id="deathOverlay" style="display:none">
+        <div class="count" id="sessionDeaths">0</div>
+        <div class="label">Deaths this stream</div>
+        <div class="total" id="totalDeaths">0 all-time</div>
       </div>
     </div>
 
-    <!-- Tab: Death log (DB-backed) -->
-    <div class="tab-content" id="tab-log">
-      <div class="panel">
-        <h2>Total Deaths Override</h2>
-        <div style="display:flex;gap:8px;align-items:center;margin-bottom:4px">
-          <input type="number" id="totalDeathsInput" min="0" value="0"
-                 style="background:var(--surface2);border:1px solid var(--border);border-radius:6px;padding:6px 10px;color:var(--text);font-size:14px;width:100px">
-          <button class="btn btn-secondary" style="width:auto;padding:6px 14px;font-size:13px" onclick="setTotalDeaths()">Set</button>
-          <span style="font-size:12px;color:var(--text-dim)" id="totalDeathsHint">Set to 0 to use actual count</span>
-        </div>
+    <!-- Sidebar -->
+    <div class="sidebar">
+      <!-- Session info + back button -->
+      <div class="session-info-bar">
+        <button class="btn btn-secondary btn-sm" onclick="stopAndReturn()" style="padding:5px 10px">&#8592; Back</button>
+        <span class="channel-name" id="sessionChannel"></span>
+        <span class="profile-badge" id="sessionProfile"></span>
+        <div style="flex:1"></div>
+        <button class="btn btn-danger btn-sm" id="stopBtn" onclick="stopBot()">Stop</button>
       </div>
-      <div class="panel" style="border-top:none;padding-top:0">
-        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
-          <h2 style="margin-bottom:0">Death Log</h2>
-          <button class="btn btn-secondary" style="width:auto;padding:4px 10px;font-size:11px" onclick="refreshDeathLog()">Refresh</button>
-        </div>
-        <div class="death-log" id="deathLog">
-          <div class="death-log-empty">No deaths recorded yet.</div>
-        </div>
-      </div>
-    </div>
 
-    <!-- Detection Scores (always visible) -->
-    <div class="panel" style="border-top:1px solid var(--border)">
-      <h2>Detection Scores</h2>
-      <div id="scoreBars">
-        <div class="score-bar bar-template"><div class="bar-header"><span class="name">Template</span><span class="value" id="s-template">0.00</span></div><div class="bar-track"><div class="bar-fill" id="b-template" style="width:0%"></div></div></div>
-        <div class="score-bar bar-text"><div class="bar-header"><span class="name">Text</span><span class="value" id="s-text">0.00</span></div><div class="bar-track"><div class="bar-fill" id="b-text" style="width:0%"></div></div></div>
-        <div class="score-bar bar-embedding"><div class="bar-header"><span class="name">Embedding</span><span class="value" id="s-embedding">0.00</span></div><div class="bar-track"><div class="bar-fill" id="b-embedding" style="width:0%"></div></div></div>
-        <div class="score-bar bar-color"><div class="bar-header"><span class="name">Dominant Color</span><span class="value" id="s-color">0.00</span></div><div class="bar-track"><div class="bar-fill" id="b-color" style="width:0%"></div></div></div>
-        <div class="score-bar bar-brightness"><div class="bar-header"><span class="name">Brightness</span><span class="value" id="s-brightness">0.00</span></div><div class="bar-track"><div class="bar-fill" id="b-brightness" style="width:0%"></div></div></div>
-        <div class="score-bar bar-fade"><div class="bar-header"><span class="name">Fade</span><span class="value" id="s-fade">0.00</span></div><div class="bar-track"><div class="bar-fill" id="b-fade" style="width:0%"></div></div></div>
-        <div class="score-bar bar-scene_change"><div class="bar-header"><span class="name">Scene Change</span><span class="value" id="s-scene_change">0.00</span></div><div class="bar-track"><div class="bar-fill" id="b-scene_change" style="width:0%"></div></div></div>
-        <div style="margin-top:8px"></div>
-        <div class="score-bar bar-confidence"><div class="bar-header"><span class="name">Confidence</span><span class="value" id="s-confidence">0.000</span></div><div class="bar-track"><div class="threshold-marker" id="thresholdMarker" style="left:80%"></div><div class="bar-fill" id="b-confidence" style="width:0%"></div></div></div>
+      <div class="tabs">
+        <button class="tab active" data-tab="stream">Stream</button>
+        <button class="tab" data-tab="chat">Chat</button>
+        <button class="tab" data-tab="clips">Clips</button>
+        <button class="tab" data-tab="log">Deaths</button>
       </div>
-      <div class="threshold-control">
-        <label style="font-size:12px;color:var(--text-dim)">Threshold</label>
-        <input type="range" id="thresholdSlider" min="0" max="1" step="0.01" value="0.80" oninput="updateThreshold(this.value)">
-        <span class="val" id="thresholdVal">0.80</span>
+
+      <!-- Tab: Stream controls -->
+      <div class="tab-content active" id="tab-stream">
+        <div class="panel">
+          <h2>Session Controls</h2>
+          <div class="toggle-row">
+            <label>Death Announcements</label>
+            <label class="toggle-switch">
+              <input type="checkbox" id="messagesToggle" checked onchange="toggleMessages()">
+              <span class="toggle-slider"></span>
+            </label>
+          </div>
+        </div>
+      </div>
+
+      <!-- Tab: Chat -->
+      <div class="tab-content" id="tab-chat">
+        <div class="panel" style="display:flex;flex-direction:column;height:calc(100vh - 53px - 50px - 42px - 33px)">
+          <div class="chat-status" id="chatStatus">
+            <span class="dot disconnected" id="chatDot"></span>
+            <span id="chatStatusText">Not connected</span>
+          </div>
+          <div class="chat-messages" id="chatMessages">
+            <div class="chat-empty">Chat messages will appear here when connected.</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Tab: Clips -->
+      <div class="tab-content" id="tab-clips">
+        <div class="panel">
+          <div class="clip-header">
+            <h2>Saved Clips</h2>
+            <button class="btn btn-secondary" style="width:auto;padding:6px 12px;font-size:12px" onclick="refreshClips()">Refresh</button>
+          </div>
+          <div class="clip-player" id="clipPlayer">
+            <video id="clipVideo" controls></video>
+          </div>
+          <div class="clip-list" id="clipList">
+            <div class="clip-empty">No clips recorded yet.</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Tab: Death log (DB-backed) -->
+      <div class="tab-content" id="tab-log">
+        <div class="panel">
+          <h2>Total Deaths Override</h2>
+          <div style="display:flex;gap:8px;align-items:center;margin-bottom:4px">
+            <input type="number" id="totalDeathsInput" min="0" value="0"
+                   style="background:var(--surface2);border:1px solid var(--border);border-radius:6px;padding:6px 10px;color:var(--text);font-size:14px;width:100px">
+            <button class="btn btn-secondary" style="width:auto;padding:6px 14px;font-size:13px" onclick="setTotalDeaths()">Set</button>
+            <span style="font-size:12px;color:var(--text-dim)" id="totalDeathsHint">Set to 0 to use actual count</span>
+          </div>
+        </div>
+        <div class="panel" style="border-top:none;padding-top:0">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+            <h2 style="margin-bottom:0">Death Log</h2>
+            <button class="btn btn-secondary" style="width:auto;padding:4px 10px;font-size:11px" onclick="refreshDeathLog()">Refresh</button>
+          </div>
+          <div class="death-log" id="deathLog">
+            <div class="death-log-empty">No deaths recorded yet.</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Detection Scores (always visible) -->
+      <div class="panel" style="border-top:1px solid var(--border)">
+        <h2>Detection Scores</h2>
+        <div id="scoreBars">
+          <div class="score-bar bar-template"><div class="bar-header"><span class="name">Template</span><span class="value" id="s-template">0.00</span></div><div class="bar-track"><div class="bar-fill" id="b-template" style="width:0%"></div></div></div>
+          <div class="score-bar bar-text"><div class="bar-header"><span class="name">Text</span><span class="value" id="s-text">0.00</span></div><div class="bar-track"><div class="bar-fill" id="b-text" style="width:0%"></div></div></div>
+          <div class="score-bar bar-embedding"><div class="bar-header"><span class="name">Embedding</span><span class="value" id="s-embedding">0.00</span></div><div class="bar-track"><div class="bar-fill" id="b-embedding" style="width:0%"></div></div></div>
+          <div class="score-bar bar-color"><div class="bar-header"><span class="name">Dominant Color</span><span class="value" id="s-color">0.00</span></div><div class="bar-track"><div class="bar-fill" id="b-color" style="width:0%"></div></div></div>
+          <div class="score-bar bar-brightness"><div class="bar-header"><span class="name">Brightness</span><span class="value" id="s-brightness">0.00</span></div><div class="bar-track"><div class="bar-fill" id="b-brightness" style="width:0%"></div></div></div>
+          <div class="score-bar bar-fade"><div class="bar-header"><span class="name">Fade</span><span class="value" id="s-fade">0.00</span></div><div class="bar-track"><div class="bar-fill" id="b-fade" style="width:0%"></div></div></div>
+          <div class="score-bar bar-scene_change"><div class="bar-header"><span class="name">Scene Change</span><span class="value" id="s-scene_change">0.00</span></div><div class="bar-track"><div class="bar-fill" id="b-scene_change" style="width:0%"></div></div></div>
+          <div style="margin-top:8px"></div>
+          <div class="score-bar bar-confidence"><div class="bar-header"><span class="name">Confidence</span><span class="value" id="s-confidence">0.000</span></div><div class="bar-track"><div class="threshold-marker" id="thresholdMarker" style="left:80%"></div><div class="bar-fill" id="b-confidence" style="width:0%"></div></div></div>
+        </div>
+        <div class="threshold-control">
+          <label style="font-size:12px;color:var(--text-dim)">Threshold</label>
+          <input type="range" id="thresholdSlider" min="0" max="1" step="0.01" value="0.80" oninput="updateThreshold(this.value)">
+          <span class="val" id="thresholdVal">0.80</span>
+        </div>
       </div>
     </div>
   </div>
 </div>
 
-<script>
-// ── Tabs ──
-document.querySelectorAll('.tab').forEach(tab => {
-  tab.addEventListener('click', () => {
-    document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
-    document.querySelectorAll('.tab-content').forEach(t => t.classList.remove('active'));
-    tab.classList.add('active');
-    document.getElementById('tab-' + tab.dataset.tab).classList.add('active');
-  });
-});
+<div class="toast" id="toast"></div>
 
+<script>
+// ═══════════════════════════════════════════════════════════════
+// STATE
+// ═══════════════════════════════════════════════════════════════
+
+let streamers = [];       // saved streamer configs from DB
 let pollInterval = null;
 let videoWs = null;
 let prevBlobUrl = null;
 let chatWs = null;
 let lastClipCount = 0;
 let deathLogPollCounter = 0;
+let activeChannel = '';   // currently running session channel
 
-// ── Start Bot ──
-async function startBot() {
-  const channel = document.getElementById('channelInput').value.trim();
-  if (!channel) { alert('Enter a channel name'); return; }
+// ═══════════════════════════════════════════════════════════════
+// VIEW TOGGLING
+// ═══════════════════════════════════════════════════════════════
 
-  document.getElementById('startBtn').disabled = true;
+function showListView() {
+  document.getElementById('listView').style.display = '';
+  document.getElementById('sessionView').className = 'session-view';
+  loadStreamers();
+}
+
+function showSessionView(channel, profileName) {
+  document.getElementById('listView').style.display = 'none';
+  document.getElementById('sessionView').className = 'session-view active';
+  document.getElementById('sessionChannel').textContent = '#' + channel;
+  document.getElementById('sessionProfile').textContent = profileName;
+}
+
+// ═══════════════════════════════════════════════════════════════
+// STREAMER CRUD
+// ═══════════════════════════════════════════════════════════════
+
+async function loadStreamers() {
+  try {
+    const res = await fetch('/api/streamers');
+    streamers = await res.json();
+    renderStreamers();
+  } catch (e) { console.error('Failed to load streamers', e); }
+}
+
+function renderStreamers() {
+  const grid = document.getElementById('streamerGrid');
+  const empty = document.getElementById('emptyState');
+
+  if (streamers.length === 0) {
+    grid.innerHTML = '';
+    empty.style.display = '';
+    return;
+  }
+
+  empty.style.display = 'none';
+  grid.innerHTML = streamers.map(s => {
+    const initial = s.channel.charAt(0).toUpperCase();
+    const updated = s.updated_at ? new Date(s.updated_at).toLocaleDateString() : '';
+    return `<div class="streamer-card" onclick="launchSession('${escapeHtml(s.channel)}')">
+      <div class="card-actions">
+        <button class="card-action-btn" onclick="event.stopPropagation();editStreamer('${escapeHtml(s.channel)}')" title="Edit">&#9998;</button>
+        <button class="card-action-btn danger" onclick="event.stopPropagation();deleteStreamer('${escapeHtml(s.channel)}')" title="Delete">&times;</button>
+      </div>
+      <div class="card-top">
+        <div class="card-avatar">${initial}</div>
+        <div>
+          <div class="card-name">${escapeHtml(s.channel)}</div>
+          <div class="card-profile">${escapeHtml(s.profile_name)}</div>
+        </div>
+      </div>
+      <div class="card-details">
+        <span class="card-tag">${escapeHtml(s.quality)}</span>
+        <span class="card-tag">thr: ${s.threshold}</span>
+        <span class="card-tag">cd: ${s.cooldown}s</span>
+        <span class="card-tag">${s.target_fps} fps</span>
+        ${s.twitch_token ? '<span class="card-tag" style="background:var(--green-dim);color:var(--green)">token</span>' : ''}
+        ${updated ? '<span class="card-tag">' + updated + '</span>' : ''}
+      </div>
+    </div>`;
+  }).join('') + `<div class="new-streamer-card" onclick="openStreamerForm()">
+    <svg width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M12 5v14m-7-7h14"/></svg>
+    Add Streamer
+  </div>`;
+}
+
+function openStreamerForm(data) {
+  const overlay = document.getElementById('formOverlay');
+  overlay.classList.add('show');
+  document.getElementById('formEditChannel').value = '';
+  document.getElementById('formTitle').textContent = 'New Streamer';
+  document.getElementById('formChannel').value = '';
+  document.getElementById('formChannel').disabled = false;
+  document.getElementById('formProfile').value = 'elden_ring';
+  document.getElementById('formThreshold').value = '0.80';
+  document.getElementById('formCooldown').value = '15';
+  document.getElementById('formQuality').value = '720p';
+  document.getElementById('formFps').value = '15';
+  document.getElementById('formToken').value = '';
+  document.getElementById('detectResult').classList.remove('show');
+
+  if (data) {
+    document.getElementById('formEditChannel').value = data.channel;
+    document.getElementById('formTitle').textContent = 'Edit Streamer';
+    document.getElementById('formChannel').value = data.channel;
+    document.getElementById('formChannel').disabled = true;
+    document.getElementById('formProfile').value = data.profile_name || 'generic';
+    document.getElementById('formThreshold').value = data.threshold;
+    document.getElementById('formCooldown').value = data.cooldown;
+    document.getElementById('formQuality').value = data.quality;
+    document.getElementById('formFps').value = data.target_fps;
+    document.getElementById('formToken').value = data.twitch_token || '';
+  }
+}
+
+function closeStreamerForm() {
+  document.getElementById('formOverlay').classList.remove('show');
+}
+
+async function saveStreamer() {
+  const channel = document.getElementById('formChannel').value.trim();
+  if (!channel) { showToast('Enter a channel name', 'error'); return; }
+
+  const data = {
+    channel,
+    profile_name: document.getElementById('formProfile').value,
+    threshold: parseFloat(document.getElementById('formThreshold').value),
+    cooldown: parseInt(document.getElementById('formCooldown').value),
+    quality: document.getElementById('formQuality').value,
+    target_fps: parseInt(document.getElementById('formFps').value),
+    twitch_token: document.getElementById('formToken').value.trim(),
+  };
+
+  try {
+    const res = await fetch('/api/streamers', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify(data),
+    });
+    if (!res.ok) {
+      const err = await res.json();
+      showToast(err.error || 'Save failed', 'error');
+      return;
+    }
+    closeStreamerForm();
+    showToast('Streamer saved', 'success');
+    loadStreamers();
+  } catch (e) {
+    showToast('Save failed', 'error');
+  }
+}
+
+function editStreamer(channel) {
+  const s = streamers.find(s => s.channel === channel);
+  if (s) openStreamerForm(s);
+}
+
+async function deleteStreamer(channel) {
+  if (!confirm('Delete streamer config for "' + channel + '"?')) return;
+  try {
+    await fetch('/api/streamers/' + encodeURIComponent(channel), {method: 'DELETE'});
+    showToast('Streamer deleted', 'success');
+    loadStreamers();
+  } catch (e) {
+    showToast('Delete failed', 'error');
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════
+// GAME DETECTION
+// ═══════════════════════════════════════════════════════════════
+
+async function detectGame() {
+  const channel = document.getElementById('formChannel').value.trim();
+  if (!channel) { showToast('Enter a channel name first', 'error'); return; }
+
+  const btn = document.getElementById('detectGameBtn');
+  const resultEl = document.getElementById('detectResult');
+  btn.disabled = true;
+  btn.textContent = 'Detecting...';
+  resultEl.classList.remove('show');
+
+  try {
+    const res = await fetch('/api/twitch/game/' + encodeURIComponent(channel));
+    const data = await res.json();
+
+    if (data.error) {
+      resultEl.textContent = data.error;
+      resultEl.className = 'detect-result error show';
+    } else if (data.game_name) {
+      let msg = 'Playing: ' + data.game_name;
+      if (data.suggested_profile) {
+        msg += ' \u2192 Profile: ' + data.suggested_profile;
+        document.getElementById('formProfile').value = data.suggested_profile;
+      } else {
+        msg += ' (no matching profile)';
+      }
+      resultEl.textContent = msg;
+      resultEl.className = 'detect-result show';
+      resultEl.style.color = '';
+    } else {
+      resultEl.textContent = 'Channel is offline or game not detected.';
+      resultEl.className = 'detect-result error show';
+    }
+  } catch (e) {
+    resultEl.textContent = 'Detection request failed.';
+    resultEl.className = 'detect-result error show';
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Detect Game';
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════
+// LAUNCH SESSION (from card click)
+// ═══════════════════════════════════════════════════════════════
+
+async function launchSession(channel) {
+  const config = streamers.find(s => s.channel === channel);
+  if (!config) return;
+
+  showSessionView(channel, config.profile_name);
+
+  // Set threshold slider from config
+  document.getElementById('thresholdSlider').value = config.threshold;
+  document.getElementById('thresholdVal').textContent = config.threshold.toFixed(2);
+  document.getElementById('thresholdMarker').style.left = (config.threshold * 100) + '%';
+
+  await startBot(config);
+}
+
+// ═══════════════════════════════════════════════════════════════
+// BOT START / STOP
+// ═══════════════════════════════════════════════════════════════
+
+async function startBot(config) {
+  const body = config ? {
+    channel: config.channel,
+    profile: config.profile_name,
+    threshold: config.threshold,
+    cooldown: config.cooldown,
+    quality: config.quality,
+    target_fps: config.target_fps,
+    twitch_token: config.twitch_token || '',
+  } : null;
+
+  if (!body) return;
+
+  activeChannel = body.channel;
 
   const res = await fetch('/api/bot/start', {
     method: 'POST',
     headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify({
-      channel,
-      profile: document.getElementById('profileSelect').value,
-      threshold: parseFloat(document.getElementById('thresholdSlider').value),
-      cooldown: parseInt(document.getElementById('cooldownInput').value),
-      quality: document.getElementById('qualitySelect').value,
-      target_fps: parseInt(document.getElementById('fpsSelect').value),
-      twitch_token: document.getElementById('twitchTokenInput').value.trim(),
-    }),
+    body: JSON.stringify(body),
   });
 
   const data = await res.json();
   if (!res.ok) {
-    alert(data.error || 'Failed to start');
-    document.getElementById('startBtn').disabled = false;
+    showToast(data.error || 'Failed to start', 'error');
+    showListView();
     return;
   }
 
@@ -748,13 +1272,12 @@ async function startBot() {
   document.getElementById('deathOverlay').style.display = 'block';
   document.getElementById('statusBadge').className = 'status-badge live';
   document.getElementById('statusBadge').textContent = 'Live';
-  document.getElementById('stopBtn').disabled = false;
 
   // Start video WS
   startVideoWS();
 
   // Connect to Twitch chat
-  connectChat(channel);
+  connectChat(body.channel);
 
   // Start polling
   if (pollInterval) clearInterval(pollInterval);
@@ -764,7 +1287,6 @@ async function startBot() {
   refreshClips();
 }
 
-// ── Stop Bot ──
 async function stopBot() {
   await fetch('/api/bot/stop', {method: 'POST'});
 
@@ -777,12 +1299,34 @@ async function stopBot() {
   document.getElementById('deathOverlay').style.display = 'none';
   document.getElementById('statusBadge').className = 'status-badge offline';
   document.getElementById('statusBadge').textContent = 'Offline';
-  document.getElementById('startBtn').disabled = false;
-  document.getElementById('stopBtn').disabled = true;
+  document.getElementById('templateCount').textContent = '';
+  document.getElementById('frameCounter').textContent = '';
   if (pollInterval) { clearInterval(pollInterval); pollInterval = null; }
+  activeChannel = '';
 }
 
-// ── Video WebSocket ──
+async function stopAndReturn() {
+  await stopBot();
+  showListView();
+}
+
+// ═══════════════════════════════════════════════════════════════
+// TABS
+// ═══════════════════════════════════════════════════════════════
+
+document.querySelectorAll('.tab').forEach(tab => {
+  tab.addEventListener('click', () => {
+    document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+    document.querySelectorAll('.tab-content').forEach(t => t.classList.remove('active'));
+    tab.classList.add('active');
+    document.getElementById('tab-' + tab.dataset.tab).classList.add('active');
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════
+// VIDEO WEBSOCKET
+// ═══════════════════════════════════════════════════════════════
+
 function startVideoWS() {
   const img = document.getElementById('videoFeed');
   img.style.display = 'block';
@@ -819,7 +1363,10 @@ function stopVideoWS() {
   }
 }
 
-// ── Poll Status ──
+// ═══════════════════════════════════════════════════════════════
+// POLL STATUS
+// ═══════════════════════════════════════════════════════════════
+
 async function pollStatus() {
   try {
     const res = await fetch('/api/bot/status');
@@ -873,14 +1420,17 @@ async function pollStatus() {
 
     // Death log — throttled DB refresh (~5s)
     deathLogPollCounter++;
-    if (deathLogPollCounter >= 10) {   // 500ms * 10 = 5s
+    if (deathLogPollCounter >= 10) {
       deathLogPollCounter = 0;
       refreshDeathLog();
     }
   } catch (e) { /* ignore poll errors */ }
 }
 
-// ── Threshold ──
+// ═══════════════════════════════════════════════════════════════
+// THRESHOLD
+// ═══════════════════════════════════════════════════════════════
+
 async function updateThreshold(val) {
   document.getElementById('thresholdVal').textContent = parseFloat(val).toFixed(2);
   document.getElementById('thresholdMarker').style.left = (val * 100) + '%';
@@ -891,7 +1441,10 @@ async function updateThreshold(val) {
   });
 }
 
-// ── Toggle Messages ──
+// ═══════════════════════════════════════════════════════════════
+// TOGGLE MESSAGES
+// ═══════════════════════════════════════════════════════════════
+
 async function toggleMessages() {
   const enabled = document.getElementById('messagesToggle').checked;
   await fetch('/api/bot/messages', {
@@ -901,7 +1454,10 @@ async function toggleMessages() {
   });
 }
 
-// ── Twitch Chat (browser-side IRC) ──
+// ═══════════════════════════════════════════════════════════════
+// TWITCH CHAT (browser-side IRC)
+// ═══════════════════════════════════════════════════════════════
+
 function escapeHtml(str) {
   const div = document.createElement('div');
   div.textContent = str;
@@ -909,7 +1465,6 @@ function escapeHtml(str) {
 }
 
 function parseIRCMessage(raw) {
-  // Parse IRC message with @tags
   let tags = {};
   let rest = raw;
 
@@ -925,7 +1480,6 @@ function parseIRCMessage(raw) {
     });
   }
 
-  // Parse :nick!user@host COMMAND #channel :message
   const match = rest.match(/^:(\S+)\s+(\S+)\s+(\S+)\s*:?(.*)/);
   if (!match) return null;
 
@@ -942,7 +1496,6 @@ function parseIRCMessage(raw) {
 
 function appendChatMessage(msg) {
   const container = document.getElementById('chatMessages');
-  // Remove empty placeholder
   const empty = container.querySelector('.chat-empty');
   if (empty) empty.remove();
 
@@ -951,12 +1504,10 @@ function appendChatMessage(msg) {
   div.innerHTML = `<span class="chat-name" style="color:${escapeHtml(msg.color)}">${escapeHtml(msg.displayName)}</span><span class="chat-text">${escapeHtml(msg.text)}</span>`;
   container.appendChild(div);
 
-  // Cap at 200 messages
   while (container.children.length > 200) {
     container.removeChild(container.firstChild);
   }
 
-  // Auto-scroll if near bottom
   if (container.scrollHeight - container.scrollTop - container.clientHeight < 100) {
     container.scrollTop = container.scrollHeight;
   }
@@ -966,7 +1517,6 @@ function connectChat(channel) {
   disconnectChat();
 
   const nick = 'justinfan' + Math.floor(Math.random() * 99999);
-
   chatWs = new WebSocket('wss://irc-ws.chat.twitch.tv:443');
 
   chatWs.onopen = () => {
@@ -983,14 +1533,10 @@ function connectChat(channel) {
     const lines = event.data.split('\r\n');
     for (const line of lines) {
       if (!line) continue;
-
-      // Handle PING
       if (line.startsWith('PING')) {
         chatWs.send('PONG :tmi.twitch.tv');
         continue;
       }
-
-      // Parse PRIVMSG
       if (line.includes('PRIVMSG')) {
         const parsed = parseIRCMessage(line);
         if (parsed && parsed.command === 'PRIVMSG') {
@@ -1020,7 +1566,10 @@ function disconnectChat() {
   document.getElementById('chatStatusText').textContent = 'Not connected';
 }
 
-// ── Clips ──
+// ═══════════════════════════════════════════════════════════════
+// CLIPS
+// ═══════════════════════════════════════════════════════════════
+
 async function refreshClips() {
   try {
     const res = await fetch('/api/bot/clips');
@@ -1054,7 +1603,10 @@ function playClip(url) {
   video.play();
 }
 
-// ── Death Database Functions ──
+// ═══════════════════════════════════════════════════════════════
+// DEATH DATABASE FUNCTIONS
+// ═══════════════════════════════════════════════════════════════
+
 async function refreshDeathLog() {
   try {
     const res = await fetch('/api/bot/db/deaths?limit=100');
@@ -1106,8 +1658,54 @@ async function deleteDeath(id) {
   } catch (e) { /* ignore */ }
 }
 
-// Initial load of death log from DB
-refreshDeathLog();
+// ═══════════════════════════════════════════════════════════════
+// TOAST
+// ═══════════════════════════════════════════════════════════════
+
+function showToast(msg, type) {
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.className = 'toast ' + type + ' show';
+  clearTimeout(t._timer);
+  t._timer = setTimeout(() => t.classList.remove('show'), 2500);
+}
+
+// ═══════════════════════════════════════════════════════════════
+// INIT
+// ═══════════════════════════════════════════════════════════════
+
+// Check if a session is already running
+(async function init() {
+  try {
+    const res = await fetch('/api/bot/status');
+    const data = await res.json();
+    if (data.running && data.channel) {
+      // Session already active — jump to session view
+      showSessionView(data.channel, data.profile);
+      activeChannel = data.channel;
+
+      document.getElementById('thresholdSlider').value = data.threshold;
+      document.getElementById('thresholdVal').textContent = data.threshold.toFixed(2);
+      document.getElementById('thresholdMarker').style.left = (data.threshold * 100) + '%';
+
+      document.getElementById('placeholder').style.display = 'none';
+      document.getElementById('deathOverlay').style.display = 'block';
+      document.getElementById('statusBadge').className = 'status-badge live';
+      document.getElementById('statusBadge').textContent = 'Live';
+
+      startVideoWS();
+      connectChat(data.channel);
+
+      if (pollInterval) clearInterval(pollInterval);
+      pollInterval = setInterval(pollStatus, 500);
+      refreshClips();
+    } else {
+      showListView();
+    }
+  } catch (e) {
+    showListView();
+  }
+})();
 </script>
 
 </body>

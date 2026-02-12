@@ -66,6 +66,19 @@ class DeathDatabase:
                 key   TEXT PRIMARY KEY,
                 value TEXT NOT NULL
             );
+
+            CREATE TABLE IF NOT EXISTS streamer_configs (
+                id              INTEGER PRIMARY KEY AUTOINCREMENT,
+                channel         TEXT    NOT NULL UNIQUE,
+                profile_name    TEXT    NOT NULL DEFAULT 'generic',
+                threshold       REAL    NOT NULL DEFAULT 0.80,
+                cooldown        INTEGER NOT NULL DEFAULT 15,
+                quality         TEXT    NOT NULL DEFAULT '720p',
+                target_fps      INTEGER NOT NULL DEFAULT 15,
+                twitch_token    TEXT    NOT NULL DEFAULT '',
+                created_at      TEXT    NOT NULL,
+                updated_at      TEXT    NOT NULL
+            );
         """)
         self._conn.commit()
 
@@ -183,6 +196,71 @@ class DeathDatabase:
             "SELECT * FROM sessions ORDER BY id DESC LIMIT ?", (limit,)
         ).fetchall()
         return [dict(r) for r in rows]
+
+    # ------------------------------------------------------------------
+    # Streamer config CRUD
+    # ------------------------------------------------------------------
+
+    def save_streamer_config(self, data: dict) -> dict:
+        """Insert or replace a streamer config. Returns the saved row."""
+        now = datetime.now(timezone.utc).isoformat()
+        channel = data["channel"].strip().lower()
+        with self._lock:
+            # Check if exists to preserve created_at
+            existing = self._conn.execute(
+                "SELECT created_at FROM streamer_configs WHERE channel = ?",
+                (channel,),
+            ).fetchone()
+            created = existing["created_at"] if existing else now
+
+            self._conn.execute(
+                """INSERT OR REPLACE INTO streamer_configs
+                   (channel, profile_name, threshold, cooldown, quality,
+                    target_fps, twitch_token, created_at, updated_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (
+                    channel,
+                    data.get("profile_name", "generic"),
+                    float(data.get("threshold", 0.80)),
+                    int(data.get("cooldown", 15)),
+                    data.get("quality", "720p"),
+                    int(data.get("target_fps", 15)),
+                    data.get("twitch_token", ""),
+                    created,
+                    now,
+                ),
+            )
+            self._conn.commit()
+
+            row = self._conn.execute(
+                "SELECT * FROM streamer_configs WHERE channel = ?", (channel,)
+            ).fetchone()
+            return dict(row)
+
+    def get_streamer_configs(self) -> list[dict]:
+        """Return all streamer configs."""
+        rows = self._conn.execute(
+            "SELECT * FROM streamer_configs ORDER BY updated_at DESC"
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+    def get_streamer_config(self, channel: str) -> dict | None:
+        """Return a single streamer config by channel, or None."""
+        row = self._conn.execute(
+            "SELECT * FROM streamer_configs WHERE channel = ?",
+            (channel.strip().lower(),),
+        ).fetchone()
+        return dict(row) if row else None
+
+    def delete_streamer_config(self, channel: str) -> bool:
+        """Delete a streamer config. Returns True if a row was deleted."""
+        with self._lock:
+            cur = self._conn.execute(
+                "DELETE FROM streamer_configs WHERE channel = ?",
+                (channel.strip().lower(),),
+            )
+            self._conn.commit()
+            return cur.rowcount > 0
 
     def get_stats(self, game: str | None = None) -> dict:
         """Aggregate statistics."""

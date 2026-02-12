@@ -29,5 +29,6 @@
   "min_brightness": 200,
   "cooldown_override": 3,
   "text_indicators": [],
-  "weights": {"template": 4, "color": 4, "brightness": 5, "scene_change": 1}
+  "weights": {"template": 4, "color": 4, "brightness": 5, "scene_change": 1},
+  "twitch_game_id": "492035"
 }

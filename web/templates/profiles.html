@@ -753,6 +753,12 @@
               <input type="number" id="fCooldown" placeholder="none" min="1" max="120">
             </div>
           </div>
+          <div class="field-row">
+            <div class="field">
+              <label>Twitch Game ID</label>
+              <input type="text" id="fTwitchGameId" placeholder="e.g. 512953">
+            </div>
+          </div>
         </div>
       </div>
 
@@ -1040,6 +1046,7 @@ function selectProfile(name) {
   document.getElementById('fDisplayName').value = p.display_name;
   document.getElementById('fTemplateDir').value = p.template_dir || '';
   document.getElementById('fCooldown').value = p.cooldown_override || '';
+  document.getElementById('fTwitchGameId').value = p.twitch_game_id || '';
 
   regions = (p.screen_regions || []).map(r => ({...r}));
   dominantColors = (p.dominant_colors || []).map(c => ({lower: [...c.lower], upper: [...c.upper]}));
@@ -1084,6 +1091,7 @@ function newProfile() {
   document.getElementById('fDisplayName').value = '';
   document.getElementById('fTemplateDir').value = '';
   document.getElementById('fCooldown').value = '';
+  document.getElementById('fTwitchGameId').value = '';
 
   regions = [];
   dominantColors = [];
@@ -1643,6 +1651,7 @@ function buildProfileData() {
     min_brightness: minOn ? parseInt(document.getElementById('minBrightSlider').value) : null,
     cooldown_override: cooldown ? parseInt(cooldown) : null,
     weights: Object.assign({}, signalWeights),
+    twitch_game_id: document.getElementById('fTwitchGameId').value.trim(),
   };
 }
 
