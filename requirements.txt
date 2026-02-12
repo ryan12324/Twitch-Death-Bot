@@ -9,4 +9,5 @@ flask-sock>=0.7.0
 paddlepaddle>=3.0.0
 paddleocr>=2.9.0
 yt-dlp>=2024.0.0
-# Optional: pip install torch torchvision  (for DINOv2 embedding signal)
+torch>=2.0.0
+torchvision>=0.15.0
