@@ -1075,7 +1075,12 @@ CLIPS_DIR = PROJECT_ROOT / "clips"
 
 @app.route("/bot")
 def bot_page():
-    return render_template("bot.html", profiles=list_profiles())
+    return render_template(
+        "bot.html",
+        profiles=list_profiles(),
+        default_channel=os.getenv("TWITCH_CHANNEL", ""),
+        default_token=os.getenv("TWITCH_TOKEN", ""),
+    )
 
 
 @app.route("/api/bot/start", methods=["POST"])

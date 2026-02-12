@@ -807,7 +807,7 @@
     <div class="detect-game-row">
       <div class="form-row">
         <label>Twitch Channel</label>
-        <input type="text" id="formChannel" placeholder="e.g. shroud">
+        <input type="text" id="formChannel" placeholder="e.g. shroud" value="{{ default_channel }}">
       </div>
       <button class="btn btn-secondary btn-sm" onclick="detectGame()" id="detectGameBtn" style="margin-bottom:14px">Detect Game</button>
     </div>
@@ -860,7 +860,7 @@
 
     <div class="form-row">
       <label>Twitch Token (optional, falls back to TWITCH_TOKEN env)</label>
-      <input type="password" id="formToken" placeholder="oauth:...">
+      <input type="password" id="formToken" placeholder="oauth:..." value="{{ default_token }}">
     </div>
 
     <div class="form-actions">
