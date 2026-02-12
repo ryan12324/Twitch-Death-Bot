@@ -818,7 +818,7 @@ async function analyzeImage(input) {
   // Update sidebar score bars (same display as live stream)
   const s = data.scores || {};
   const uploadConfigured = s.configured || [];
-  for (const key of ['template', 'text', 'color', 'brightness', 'fade', 'scene_change']) {
+  for (const key of ['template', 'text', 'embedding', 'color', 'brightness', 'fade', 'scene_change']) {
     const val = s[key] || 0;
     const el = document.getElementById('s-' + key);
     const bar = document.getElementById('b-' + key);
