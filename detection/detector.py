@@ -580,10 +580,10 @@ class DeathDetector:
 
         Returns 0-1 score (max similarity across all templates).
         """
-        import torch
-
         if not self._ensure_dino_loaded():
             return 0.0
+
+        import torch
         if self._template_embeddings is None:
             return 0.0
 
