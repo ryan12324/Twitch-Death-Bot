@@ -18,6 +18,7 @@ from pathlib import Path
 DEFAULT_WEIGHTS: dict[str, float] = {
     "template": 5.0,
     "text": 4.0,
+    "embedding": 4.0,
     "color": 3.0,
     "brightness": 2.0,
     "fade": 3.0,

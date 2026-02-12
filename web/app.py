@@ -22,6 +22,7 @@ import sys
 import tempfile
 import threading
 import time
+from datetime import datetime, timezone
 from pathlib import Path
 
 import cv2
@@ -36,6 +37,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from bot.twitch_bot import DeathBot
 from detection.clip_recorder import ClipRecorder
 from detection.counter import DeathCounter
+from detection.death_db import DeathDatabase
 from detection.detector import DeathDetector
 from detection.stream_capture import StreamCapture
 from game_profiles.profiles import (
@@ -92,6 +94,9 @@ state = {
     "bot_thread": None,         # threading.Thread running bot
     "messages_enabled": True,   # toggle for death announcements
     "channel": "",              # active channel name
+    # SQLite death database (used by bot control panel only)
+    "death_db": DeathDatabase(),
+    "db_session_id": None,
 }
 state_lock = threading.Lock()
 stop_event = threading.Event()
@@ -107,6 +112,8 @@ def _get_scores(detector: DeathDetector) -> dict:
     """Return the individual scores from the detector's last analyze_frame call."""
     return detector.last_scores or {
         "template": 0.0,
+        "text": 0.0,
+        "embedding": 0.0,
         "color": 0.0,
         "brightness": 0.0,
         "fade": 0.0,
@@ -189,6 +196,7 @@ def _draw_overlays(frame: np.ndarray, overlay: dict, detector: DeathDetector) ->
     bar_items = [
         ("template", (180, 120, 0)),
         ("text", (0, 140, 255)),
+        ("embedding", (205, 188, 0)),
         ("color", (0, 180, 0)),
         ("brightness", (0, 180, 180)),
         ("fade", (180, 0, 180)),
@@ -315,8 +323,23 @@ def _detection_thread():
 
                 # Clip recording
                 clip_recorder = state.get("clip_recorder")
+                clip_filename = None
                 if clip_recorder:
+                    clip_filename = f"death_{session_count:04d}_{time.strftime('%Y%m%d_%H%M%S')}.mp4"
                     clip_recorder.on_death(session_count)
+
+                # SQLite death record
+                db = state.get("death_db")
+                if db:
+                    db.record_death(
+                        timestamp=datetime.now(timezone.utc).isoformat(),
+                        session_count=session_count,
+                        total_count=counter.total_deaths,
+                        confidence=confidence,
+                        game=game,
+                        channel=state.get("channel", ""),
+                        clip_filename=clip_filename,
+                    )
 
                 # Bot death announcement
                 if state.get("messages_enabled", False):
@@ -388,7 +411,7 @@ def _video_thread():
         else:
             fps = 0
         bar_x = target_w - 200
-        y_fps = 20 + 6 * (18 + 4) + 8 + 24 + 28 + 4
+        y_fps = 20 + 7 * (18 + 4) + 8 + 24 + 28 + 4
         cv2.putText(
             display, f"{fps:.1f} fps",
             (bar_x, y_fps + 14), cv2.FONT_HERSHEY_SIMPLEX, 0.4, (180, 180, 180), 1,
@@ -1004,6 +1027,13 @@ def _stop_bot_capture() -> dict:
             clip_rec.flush()
             state["clip_recorder"] = None
 
+        # End SQLite session
+        db = state.get("death_db")
+        db_session_id = state.get("db_session_id")
+        if db and db_session_id:
+            db.end_session(db_session_id, state["counter"].session_deaths)
+            state["db_session_id"] = None
+
         # End counter session
         if state["counter"]:
             summary = state["counter"].end_session()
@@ -1079,6 +1109,9 @@ def api_bot_start():
     counter = DeathCounter()
     counter.start_session(profile_name)
 
+    # Start SQLite session
+    db_session_id = state["death_db"].start_session(profile_name, channel)
+
     # Initialize clip recorder
     clip_recorder = ClipRecorder(enabled=True, output_dir=CLIPS_DIR)
 
@@ -1095,6 +1128,7 @@ def api_bot_start():
         state["frame_count"] = 0
         state["channel"] = channel
         state["clip_recorder"] = clip_recorder
+        state["db_session_id"] = db_session_id
         state["messages_enabled"] = bool(twitch_token)
         state["overlay_state"] = {
             "scores": {},
@@ -1211,6 +1245,91 @@ def api_bot_clip_file(filename):
     if not CLIPS_DIR.exists():
         return jsonify({"error": "No clips directory"}), 404
     return send_from_directory(str(CLIPS_DIR), filename)
+
+
+# ---------------------------------------------------------------------------
+# Death Database API endpoints (SQLite-backed)
+# ---------------------------------------------------------------------------
+
+
+@app.route("/api/bot/db/deaths")
+def api_db_deaths():
+    """List deaths from SQLite DB, newest first."""
+    db = state.get("death_db")
+    if not db:
+        return jsonify([])
+    limit = request.args.get("limit", 100, type=int)
+    offset = request.args.get("offset", 0, type=int)
+    game = request.args.get("game")
+    return jsonify(db.get_deaths(limit=limit, offset=offset, game=game))
+
+
+@app.route("/api/bot/db/deaths/<int:death_id>", methods=["DELETE"])
+def api_db_death_delete(death_id):
+    """Delete a death record."""
+    db = state.get("death_db")
+    if not db:
+        return jsonify({"error": "Database not available"}), 500
+    if db.delete_death(death_id):
+        return jsonify({"status": "deleted"})
+    return jsonify({"error": "Death not found"}), 404
+
+
+@app.route("/api/bot/db/deaths/<int:death_id>", methods=["PATCH"])
+def api_db_death_update(death_id):
+    """Update notes or clip_filename on a death record."""
+    db = state.get("death_db")
+    if not db:
+        return jsonify({"error": "Database not available"}), 500
+    data = request.json or {}
+    kwargs = {}
+    if "notes" in data:
+        kwargs["notes"] = data["notes"]
+    if "clip_filename" in data:
+        kwargs["clip_filename"] = data["clip_filename"]
+    if not kwargs:
+        return jsonify({"error": "No updatable fields provided"}), 400
+    if db.update_death(death_id, **kwargs):
+        return jsonify(db.get_death(death_id))
+    return jsonify({"error": "Death not found"}), 404
+
+
+@app.route("/api/bot/db/stats")
+def api_db_stats():
+    """Aggregate death statistics."""
+    db = state.get("death_db")
+    if not db:
+        return jsonify({"total_deaths": 0, "per_game": {}, "session_count": 0})
+    game = request.args.get("game")
+    return jsonify(db.get_stats(game=game))
+
+
+@app.route("/api/bot/db/total_deaths", methods=["POST"])
+def api_db_total_deaths():
+    """Set total deaths override. Also syncs to the JSON counter."""
+    db = state.get("death_db")
+    if not db:
+        return jsonify({"error": "Database not available"}), 500
+    data = request.json or {}
+    total = int(data.get("total_deaths", 0))
+    db.set_total_deaths(total)
+    # Sync to the JSON counter so bot chat commands reflect the override
+    with state_lock:
+        counter = state.get("counter")
+        if counter and total > 0:
+            counter.data["total_deaths"] = total
+            counter._save()
+    return jsonify({"total_deaths": db.get_total_deaths()})
+
+
+@app.route("/api/bot/db/sessions")
+def api_db_sessions():
+    """List sessions from SQLite DB."""
+    db = state.get("death_db")
+    if not db:
+        return jsonify([])
+    limit = request.args.get("limit", 50, type=int)
+    return jsonify(db.get_sessions(limit=limit))
 
 
 # ---------------------------------------------------------------------------

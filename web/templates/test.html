@@ -226,6 +226,7 @@
   .bar-color .bar-fill { background: #4caf50; }
   .bar-brightness .bar-fill { background: #ff9800; }
   .bar-fade .bar-fill { background: #9c27b0; }
+  .bar-embedding .bar-fill { background: #00bcd4; }
   .bar-scene_change .bar-fill { background: #f44336; }
   .bar-confidence .bar-fill { background: var(--accent); }
   .bar-confidence .bar-track { height: 14px; border-radius: 7px; }
@@ -569,6 +570,7 @@
       <div id="scoreBars">
         <div class="score-bar bar-template"><div class="bar-header"><span class="name">Template</span><span class="value" id="s-template">0.00</span></div><div class="bar-track"><div class="bar-fill" id="b-template" style="width:0%"></div></div></div>
         <div class="score-bar bar-text"><div class="bar-header"><span class="name">Text</span><span class="value" id="s-text">0.00</span></div><div class="bar-track"><div class="bar-fill" id="b-text" style="width:0%"></div></div></div>
+        <div class="score-bar bar-embedding"><div class="bar-header"><span class="name">Embedding</span><span class="value" id="s-embedding">0.00</span></div><div class="bar-track"><div class="bar-fill" id="b-embedding" style="width:0%"></div></div></div>
         <div class="score-bar bar-color"><div class="bar-header"><span class="name">Dominant Color</span><span class="value" id="s-color">0.00</span></div><div class="bar-track"><div class="bar-fill" id="b-color" style="width:0%"></div></div></div>
         <div class="score-bar bar-brightness"><div class="bar-header"><span class="name">Brightness</span><span class="value" id="s-brightness">0.00</span></div><div class="bar-track"><div class="bar-fill" id="b-brightness" style="width:0%"></div></div></div>
         <div class="score-bar bar-fade"><div class="bar-header"><span class="name">Fade</span><span class="value" id="s-fade">0.00</span></div><div class="bar-track"><div class="bar-fill" id="b-fade" style="width:0%"></div></div></div>
@@ -710,7 +712,7 @@ async function pollStatus() {
     // Update scores
     const scores = data.scores || {};
     const configured = scores.configured || [];
-    for (const key of ['template', 'text', 'color', 'brightness', 'fade', 'scene_change']) {
+    for (const key of ['template', 'text', 'embedding', 'color', 'brightness', 'fade', 'scene_change']) {
       const val = scores[key] || 0;
       const el = document.getElementById('s-' + key);
       const bar = document.getElementById('b-' + key);
@@ -777,6 +779,7 @@ const DEBUG_TAB_ORDER = [
   {key: 'template_match', label: 'Template Match'},
   {key: 'edge_detection', label: 'Edge Detection'},
   {key: 'text_detection', label: 'Text Detection'},
+  {key: 'embedding', label: 'Embedding'},
   {key: 'color_mask', label: 'Color Mask'},
   {key: 'brightness', label: 'Brightness'},
   {key: 'fade_mask', label: 'Fade Mask'},
@@ -916,7 +919,7 @@ async function analyzeClip() {
     // Update sidebar score bars
     const s = data.scores || {};
     const clipConfigured = s.configured || [];
-    for (const key of ['template', 'text', 'color', 'brightness', 'fade', 'scene_change']) {
+    for (const key of ['template', 'text', 'embedding', 'color', 'brightness', 'fade', 'scene_change']) {
       const val = s[key] || 0;
       const el = document.getElementById('s-' + key);
       const bar = document.getElementById('b-' + key);

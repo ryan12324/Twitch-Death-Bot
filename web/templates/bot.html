@@ -226,6 +226,7 @@
   .bar-color .bar-fill { background: #4caf50; }
   .bar-brightness .bar-fill { background: #ff9800; }
   .bar-fade .bar-fill { background: #9c27b0; }
+  .bar-embedding .bar-fill { background: #00bcd4; }
   .bar-scene_change .bar-fill { background: #f44336; }
   .bar-confidence .bar-fill { background: var(--accent); }
   .bar-confidence .bar-track { height: 14px; border-radius: 7px; }
@@ -302,6 +303,24 @@
     font-size: 12px;
     font-variant-numeric: tabular-nums;
   }
+  .death-entry .clip-link {
+    color: var(--accent);
+    font-size: 11px;
+    cursor: pointer;
+    text-decoration: underline;
+  }
+  .death-entry .clip-link:hover { color: var(--accent-hover); }
+  .death-entry .delete-btn {
+    background: none;
+    border: none;
+    color: var(--text-dim);
+    cursor: pointer;
+    font-size: 14px;
+    padding: 2px 6px;
+    border-radius: 4px;
+    line-height: 1;
+  }
+  .death-entry .delete-btn:hover { color: var(--red); background: var(--surface2); }
 
   /* Tabs */
   .tabs {
@@ -626,10 +645,22 @@
       </div>
     </div>
 
-    <!-- Tab: Death log -->
+    <!-- Tab: Death log (DB-backed) -->
     <div class="tab-content" id="tab-log">
       <div class="panel">
-        <h2>Death Log</h2>
+        <h2>Total Deaths Override</h2>
+        <div style="display:flex;gap:8px;align-items:center;margin-bottom:4px">
+          <input type="number" id="totalDeathsInput" min="0" value="0"
+                 style="background:var(--surface2);border:1px solid var(--border);border-radius:6px;padding:6px 10px;color:var(--text);font-size:14px;width:100px">
+          <button class="btn btn-secondary" style="width:auto;padding:6px 14px;font-size:13px" onclick="setTotalDeaths()">Set</button>
+          <span style="font-size:12px;color:var(--text-dim)" id="totalDeathsHint">Set to 0 to use actual count</span>
+        </div>
+      </div>
+      <div class="panel" style="border-top:none;padding-top:0">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+          <h2 style="margin-bottom:0">Death Log</h2>
+          <button class="btn btn-secondary" style="width:auto;padding:4px 10px;font-size:11px" onclick="refreshDeathLog()">Refresh</button>
+        </div>
         <div class="death-log" id="deathLog">
           <div class="death-log-empty">No deaths recorded yet.</div>
         </div>
@@ -642,6 +673,7 @@
       <div id="scoreBars">
         <div class="score-bar bar-template"><div class="bar-header"><span class="name">Template</span><span class="value" id="s-template">0.00</span></div><div class="bar-track"><div class="bar-fill" id="b-template" style="width:0%"></div></div></div>
         <div class="score-bar bar-text"><div class="bar-header"><span class="name">Text</span><span class="value" id="s-text">0.00</span></div><div class="bar-track"><div class="bar-fill" id="b-text" style="width:0%"></div></div></div>
+        <div class="score-bar bar-embedding"><div class="bar-header"><span class="name">Embedding</span><span class="value" id="s-embedding">0.00</span></div><div class="bar-track"><div class="bar-fill" id="b-embedding" style="width:0%"></div></div></div>
         <div class="score-bar bar-color"><div class="bar-header"><span class="name">Dominant Color</span><span class="value" id="s-color">0.00</span></div><div class="bar-track"><div class="bar-fill" id="b-color" style="width:0%"></div></div></div>
         <div class="score-bar bar-brightness"><div class="bar-header"><span class="name">Brightness</span><span class="value" id="s-brightness">0.00</span></div><div class="bar-track"><div class="bar-fill" id="b-brightness" style="width:0%"></div></div></div>
         <div class="score-bar bar-fade"><div class="bar-header"><span class="name">Fade</span><span class="value" id="s-fade">0.00</span></div><div class="bar-track"><div class="bar-fill" id="b-fade" style="width:0%"></div></div></div>
@@ -674,6 +706,7 @@ let videoWs = null;
 let prevBlobUrl = null;
 let chatWs = null;
 let lastClipCount = 0;
+let deathLogPollCounter = 0;
 
 // ── Start Bot ──
 async function startBot() {
@@ -795,7 +828,7 @@ async function pollStatus() {
     // Update scores
     const scores = data.scores || {};
     const configured = scores.configured || [];
-    for (const key of ['template', 'text', 'color', 'brightness', 'fade', 'scene_change']) {
+    for (const key of ['template', 'text', 'embedding', 'color', 'brightness', 'fade', 'scene_change']) {
       const val = scores[key] || 0;
       const el = document.getElementById('s-' + key);
       const bar = document.getElementById('b-' + key);
@@ -838,21 +871,11 @@ async function pollStatus() {
       refreshClips();
     }
 
-    // Death log
-    const log = data.death_log || [];
-    const logEl = document.getElementById('deathLog');
-    if (log.length === 0) {
-      logEl.innerHTML = '<div class="death-log-empty">No deaths recorded yet.</div>';
-    } else {
-      logEl.innerHTML = log.slice().reverse().map(d =>
-        `<div class="death-entry">
-          <div class="num">${d.session_count}</div>
-          <div class="info">Death #${d.session_count}
-            <div class="conf">Confidence: ${d.confidence} &middot; Total: ${d.total_count}</div>
-          </div>
-          <div class="timestamp">${d.time}</div>
-        </div>`
-      ).join('');
+    // Death log — throttled DB refresh (~5s)
+    deathLogPollCounter++;
+    if (deathLogPollCounter >= 10) {   // 500ms * 10 = 5s
+      deathLogPollCounter = 0;
+      refreshDeathLog();
     }
   } catch (e) { /* ignore poll errors */ }
 }
@@ -1030,6 +1053,61 @@ function playClip(url) {
   video.src = url;
   video.play();
 }
+
+// ── Death Database Functions ──
+async function refreshDeathLog() {
+  try {
+    const res = await fetch('/api/bot/db/deaths?limit=100');
+    const deaths = await res.json();
+
+    const logEl = document.getElementById('deathLog');
+    if (!deaths.length) {
+      logEl.innerHTML = '<div class="death-log-empty">No deaths recorded yet.</div>';
+      return;
+    }
+
+    logEl.innerHTML = deaths.map(d => {
+      const ts = d.timestamp ? new Date(d.timestamp).toLocaleTimeString() : '';
+      const clipHtml = d.clip_filename
+        ? `<span class="clip-link" onclick="event.stopPropagation();playClip('/api/bot/clips/${escapeHtml(d.clip_filename)}')">${escapeHtml(d.clip_filename)}</span>`
+        : '';
+      return `<div class="death-entry">
+        <div class="num">${d.session_count}</div>
+        <div class="info">Death #${d.session_count} <span style="color:var(--text-dim);font-size:11px">${escapeHtml(d.game || '')}</span>
+          <div class="conf">Confidence: ${d.confidence.toFixed(3)} &middot; Total: ${d.total_count}${clipHtml ? ' &middot; ' + clipHtml : ''}</div>
+        </div>
+        <div class="timestamp">${ts}</div>
+        <button class="delete-btn" title="Delete" onclick="deleteDeath(${d.id})">&times;</button>
+      </div>`;
+    }).join('');
+  } catch (e) { /* ignore */ }
+}
+
+async function setTotalDeaths() {
+  const input = document.getElementById('totalDeathsInput');
+  const total = parseInt(input.value) || 0;
+  try {
+    const res = await fetch('/api/bot/db/total_deaths', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({total_deaths: total}),
+    });
+    const data = await res.json();
+    document.getElementById('totalDeathsHint').textContent =
+      total > 0 ? 'Override active: ' + data.total_deaths : 'Set to 0 to use actual count';
+  } catch (e) { /* ignore */ }
+}
+
+async function deleteDeath(id) {
+  if (!confirm('Delete this death record?')) return;
+  try {
+    await fetch('/api/bot/db/deaths/' + id, {method: 'DELETE'});
+    refreshDeathLog();
+  } catch (e) { /* ignore */ }
+}
+
+// Initial load of death log from DB
+refreshDeathLog();
 </script>
 
 </body>

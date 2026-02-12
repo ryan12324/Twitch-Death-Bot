@@ -7,6 +7,7 @@ Uses multiple strategies to detect death screens:
 3. Brightness analysis - death screens are often very dark or very bright
 4. Fade detection - detect full-screen fade to black/red
 5. Scene change detection - detect sudden transitions between frames
+6. DINOv2 embedding - one-shot semantic similarity via vision transformer
 
 Templates are sub-images (e.g. a cropped "YOU DIED" text). The detector
 scans the frame at multiple scales to find them, like ctrl+F for images.
@@ -55,6 +56,13 @@ class DeathDetector:
 
         # Last computed individual scores (populated by analyze_frame)
         self.last_scores: dict[str, float] = {}
+
+        # DINOv2 embedding model (lazy-loaded)
+        self._dino_model = None
+        self._dino_available: bool | None = None  # None = unchecked
+        self._template_embeddings = None  # [N, 384] tensor after loading
+        self._last_embedding_score: float = 0.0
+        self._last_embedding_best_idx: int = 0
 
         logger.info(
             "DeathDetector init: profile=%s threshold=%.2f cooldown=%d "
@@ -496,6 +504,154 @@ class DeathDetector:
         logger.debug("text_detection: final score=%.4f", best_score)
         return best_score
 
+    # ------------------------------------------------------------------
+    # DINOv2 embedding signal
+    # ------------------------------------------------------------------
+
+    def _ensure_dino_loaded(self) -> bool:
+        """Lazy-load DINOv2-small and precompute template embeddings.
+
+        Returns True if the model is ready, False otherwise.
+        Sets self._dino_available so subsequent calls skip loading.
+        """
+        if self._dino_available is not None:
+            return self._dino_available
+
+        try:
+            import torch
+        except ImportError:
+            logger.warning("embedding: torch not installed — DINOv2 signal disabled")
+            self._dino_available = False
+            return False
+
+        try:
+            logger.info("embedding: loading DINOv2-small (vits14)...")
+            model = torch.hub.load("facebookresearch/dinov2", "dinov2_vits14")
+            model.eval()
+            self._dino_model = model
+
+            # Precompute L2-normalized embeddings for all templates
+            embeddings = []
+            for tmpl_bgr in self.templates_bgr:
+                inp = self._preprocess_for_dino(tmpl_bgr)
+                with torch.no_grad():
+                    emb = model(inp)  # [1, 384]
+                emb = emb / emb.norm(dim=-1, keepdim=True)
+                embeddings.append(emb)
+
+            if embeddings:
+                self._template_embeddings = torch.cat(embeddings, dim=0)  # [N, 384]
+            else:
+                self._template_embeddings = None
+
+            self._dino_available = True
+            logger.info(
+                "embedding: DINOv2 loaded, %d template embeddings precomputed",
+                len(embeddings),
+            )
+            return True
+
+        except Exception as e:
+            logger.warning("embedding: failed to load DINOv2: %s", e)
+            self._dino_available = False
+            return False
+
+    def _preprocess_for_dino(self, bgr_image: np.ndarray):
+        """Convert a BGR image to a DINOv2-ready [1,3,224,224] tensor.
+
+        Pure numpy/torch ops — no torchvision dependency needed.
+        """
+        import torch
+
+        # BGR -> RGB
+        rgb = cv2.cvtColor(bgr_image, cv2.COLOR_BGR2RGB)
+        # Resize to 224x224
+        rgb = cv2.resize(rgb, (224, 224))
+        # float [0, 1]
+        tensor = torch.from_numpy(rgb).float().permute(2, 0, 1) / 255.0
+        # ImageNet normalize
+        mean = torch.tensor([0.485, 0.456, 0.406]).view(3, 1, 1)
+        std = torch.tensor([0.229, 0.224, 0.225]).view(3, 1, 1)
+        tensor = (tensor - mean) / std
+        return tensor.unsqueeze(0)  # [1, 3, 224, 224]
+
+    def _embedding_score(self, frame: np.ndarray) -> float:
+        """Compute cosine similarity between frame and template embeddings.
+
+        Returns 0-1 score (max similarity across all templates).
+        """
+        import torch
+
+        if not self._ensure_dino_loaded():
+            return 0.0
+        if self._template_embeddings is None:
+            return 0.0
+
+        # Crop to first screen_region if defined (same as template matching)
+        crop = frame
+        if self.profile.screen_regions:
+            crop = self._extract_region(frame, self.profile.screen_regions[0])
+
+        inp = self._preprocess_for_dino(crop)
+        with torch.no_grad():
+            emb = self._dino_model(inp)  # [1, 384]
+        emb = emb / emb.norm(dim=-1, keepdim=True)
+
+        # Cosine similarity = dot product of L2-normalized vectors
+        sims = (emb @ self._template_embeddings.T).squeeze(0)  # [N]
+        best_idx = sims.argmax().item()
+        best_sim = max(0.0, sims[best_idx].item())  # clamp negatives
+
+        self._last_embedding_score = best_sim
+        self._last_embedding_best_idx = best_idx
+
+        logger.debug("embedding: best_sim=%.4f (template %d)", best_sim, best_idx)
+        return best_sim
+
+    def _debug_embedding(self, frame: np.ndarray) -> np.ndarray:
+        """Debug visualization: side-by-side frame crop vs best template."""
+        h_target = 224
+
+        # Get frame crop
+        crop = frame
+        if self.profile.screen_regions:
+            crop = self._extract_region(frame, self.profile.screen_regions[0])
+        crop_resized = cv2.resize(crop, (h_target, h_target))
+
+        # Get best matching template
+        best_idx = self._last_embedding_best_idx
+        if self.templates_bgr and best_idx < len(self.templates_bgr):
+            tmpl = cv2.resize(self.templates_bgr[best_idx], (h_target, h_target))
+        else:
+            tmpl = np.zeros((h_target, h_target, 3), dtype=np.uint8)
+
+        # Side-by-side
+        vis = np.hstack([crop_resized, tmpl])
+
+        # Colored border
+        score = self._last_embedding_score
+        border_color = (0, 255, 0) if score > 0.7 else (0, 165, 255)
+        cv2.rectangle(vis, (0, 0), (vis.shape[1] - 1, vis.shape[0] - 1), border_color, 3)
+
+        # Divider line
+        cv2.line(vis, (h_target, 0), (h_target, h_target), (255, 255, 255), 1)
+
+        # Labels
+        cv2.putText(
+            vis, f"Cosine sim: {score:.4f}",
+            (8, 20), cv2.FONT_HERSHEY_SIMPLEX, 0.5, border_color, 2,
+        )
+        cv2.putText(
+            vis, "Frame crop",
+            (8, h_target - 8), cv2.FONT_HERSHEY_SIMPLEX, 0.4, (200, 200, 200), 1,
+        )
+        cv2.putText(
+            vis, f"Template #{best_idx}",
+            (h_target + 8, h_target - 8), cv2.FONT_HERSHEY_SIMPLEX, 0.4, (200, 200, 200), 1,
+        )
+
+        return vis
+
     @staticmethod
     def _normalize_frame(frame: np.ndarray) -> np.ndarray:
         """Scale frame to fit within working resolution, preserving aspect ratio.
@@ -588,12 +744,27 @@ class DeathDetector:
         else:
             self._last_text_boxes = []
 
+        # --- Expensive: DINOv2 embedding. Gate behind cheaper signals. ---
+        embedding_score = 0.0
+        if self.templates_bgr and _weight("embedding") > 0:
+            gate_score = max(template_score, color_score, brightness_score, fade_score)
+            has_cheap_signals = bool(
+                self.templates or self.profile.dominant_colors
+                or self.profile.max_brightness is not None
+                or self.profile.min_brightness is not None
+                or self.profile.fade_to_color is not None
+            )
+            if not has_cheap_signals or gate_score > 0.4:
+                embedding_score = self._embedding_score(frame)
+
         # Build map of configured signals (only signals the profile has data for AND weight > 0)
         configured: dict[str, float] = {}
         if self.templates and _weight("template") > 0:
             configured["template"] = template_score
         if self.profile.text_indicators and _weight("text") > 0:
             configured["text"] = text_score
+        if self.templates_bgr and _weight("embedding") > 0 and self._dino_available:
+            configured["embedding"] = embedding_score
         if self.profile.dominant_colors and _weight("color") > 0:
             configured["color"] = color_score
         if (self.profile.max_brightness is not None or self.profile.min_brightness is not None) and _weight("brightness") > 0:
@@ -622,6 +793,7 @@ class DeathDetector:
         self.last_scores = {
             "template": round(template_score, 4),
             "text": round(text_score, 4),
+            "embedding": round(embedding_score, 4),
             "color": round(color_score, 4),
             "brightness": round(brightness_score, 4),
             "fade": round(fade_score, 4),
@@ -652,11 +824,13 @@ class DeathDetector:
             self.last_detection_time = now
             self.death_frame_count = 0
             logger.info(
-                "DEATH DETECTED! Confidence: %.2f (template=%.2f, text=%.2f, color=%.2f, "
-                "brightness=%.2f, fade=%.2f, scene_change=%.2f)",
+                "DEATH DETECTED! Confidence: %.2f (template=%.2f, text=%.2f, "
+                "embedding=%.2f, color=%.2f, brightness=%.2f, fade=%.2f, "
+                "scene_change=%.2f)",
                 confidence,
                 template_score,
                 text_score,
+                embedding_score,
                 color_score,
                 brightness_score,
                 fade_score,
@@ -698,6 +872,9 @@ class DeathDetector:
             debug_images["fade_mask"] = fade_img
 
         debug_images["text_detection"] = self._debug_text_detection(frame)
+
+        if self._dino_available and self.templates_bgr:
+            debug_images["embedding"] = self._debug_embedding(frame)
 
         return is_death, confidence, debug_images
 
