@@ -38,11 +38,21 @@ def get_config() -> dict:
     """Read configuration from environment variables."""
     token = os.getenv("TWITCH_TOKEN", "")
     channel = os.getenv("TWITCH_CHANNEL", "")
+    client_id = os.getenv("TWITCH_CLIENT_ID", "")
+    client_secret = os.getenv("TWITCH_CLIENT_SECRET", "")
+    bot_id = os.getenv("TWITCH_BOT_ID", "")
 
-    if not token or not channel:
+    if not channel:
         logger.error(
-            "TWITCH_TOKEN and TWITCH_CHANNEL must be set. "
+            "TWITCH_CHANNEL must be set. "
             "Copy config.example.env to .env and fill in your values."
+        )
+        sys.exit(1)
+
+    if not client_id or not client_secret or not bot_id:
+        logger.error(
+            "TWITCH_CLIENT_ID, TWITCH_CLIENT_SECRET, and TWITCH_BOT_ID must be set. "
+            "Register an app at https://dev.twitch.tv/console and set these in .env."
         )
         sys.exit(1)
 
@@ -67,6 +77,9 @@ def get_config() -> dict:
 
     return {
         "token": token,
+        "client_id": client_id,
+        "client_secret": client_secret,
+        "bot_id": bot_id,
         "channel": channel,
         "game": game,
         "target_fps": target_fps,
@@ -173,11 +186,14 @@ def main() -> None:
     )
 
     bot = DeathBot(
-        token=config["token"],
+        client_id=config["client_id"],
+        client_secret=config["client_secret"],
+        bot_id=config["bot_id"],
         prefix="!",
         channel=config["channel"],
         counter=counter,
         game=profile.display_name,
+        user_token=config["token"],
         clip_recorder=clip_recorder,
     )
 
@@ -206,20 +222,21 @@ def main() -> None:
         logger.info("Starting bot in chat-only mode (no detection).")
         logger.info("Detection will start when the stream goes live.")
 
-    # Start detection in background thread
-    loop = asyncio.new_event_loop()
-
-    detection_thread = threading.Thread(
-        target=detection_loop,
-        args=(capture, detector, counter, clip_recorder, config["game"], bot, loop, stop_event),
-        daemon=True,
-    )
-    detection_thread.start()
+    async def _run_bot():
+        loop = asyncio.get_running_loop()
+        detection_thread = threading.Thread(
+            target=detection_loop,
+            args=(capture, detector, counter, clip_recorder, config["game"], bot, loop, stop_event),
+            daemon=True,
+        )
+        detection_thread.start()
+        async with bot:
+            await bot.start()
 
     # Run the bot (blocking)
     logger.info("Bot starting... Press Ctrl+C to stop.")
     try:
-        bot.run()
+        asyncio.run(_run_bot())
     except KeyboardInterrupt:
         pass
     finally:
