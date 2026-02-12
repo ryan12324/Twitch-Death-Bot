@@ -984,31 +984,23 @@ def _stop_capture() -> dict:
     return summary
 
 
-def _start_bot_thread(client_id: str, client_secret: str, bot_id: str,
-                      user_token: str, channel: str, counter: DeathCounter,
+def _start_bot_thread(token: str, channel: str, counter: DeathCounter,
                       game: str, clip_recorder: ClipRecorder | None):
     """Create DeathBot and run it in a background thread with its own event loop."""
     loop = asyncio.new_event_loop()
     bot = DeathBot(
-        client_id=client_id,
-        client_secret=client_secret,
-        bot_id=bot_id,
+        token=token,
         prefix="!",
         channel=channel,
         counter=counter,
         game=game,
-        user_token=user_token,
         clip_recorder=clip_recorder,
     )
-
-    async def _run_async():
-        async with bot:
-            await bot.start()
 
     def _run():
         asyncio.set_event_loop(loop)
         try:
-            loop.run_until_complete(_run_async())
+            loop.run_until_complete(bot.start())
         except Exception:
             logger.exception("Bot event loop error")
         finally:
@@ -1097,9 +1089,6 @@ def api_bot_start():
     quality = data.get("quality", "720p")
     target_fps = int(data.get("target_fps", 15))
     twitch_token = data.get("twitch_token", "").strip() or os.getenv("TWITCH_TOKEN", "")
-    client_id = os.getenv("TWITCH_CLIENT_ID", "")
-    client_secret = os.getenv("TWITCH_CLIENT_SECRET", "")
-    bot_id = os.getenv("TWITCH_BOT_ID", "")
 
     if not channel:
         return jsonify({"error": "Channel name is required"}), 400
@@ -1162,11 +1151,10 @@ def api_bot_start():
     tv = threading.Thread(target=_video_thread, daemon=True)
     tv.start()
 
-    # Start bot if credentials provided
+    # Start bot if token provided
     bot_connected = False
-    if twitch_token and client_id and client_secret and bot_id:
+    if twitch_token:
         bot, bot_loop, bot_thread = _start_bot_thread(
-            client_id, client_secret, bot_id,
             twitch_token, channel, counter, profile.display_name, clip_recorder,
         )
         with state_lock:
