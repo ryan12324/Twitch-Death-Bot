@@ -9,5 +9,5 @@ flask-sock>=0.7.0
 paddlepaddle>=3.0.0
 paddleocr>=2.9.0
 yt-dlp>=2024.0.0
-torch>=2.0.0
-torchvision>=0.15.0
+torch>=2.10.0
+torchvision>=0.25.0
