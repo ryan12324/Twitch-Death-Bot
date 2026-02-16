@@ -985,16 +985,18 @@ def _stop_capture() -> dict:
 
 
 def _start_bot_thread(token: str, channel: str, counter: DeathCounter,
-                      game: str, clip_recorder: ClipRecorder | None):
+                      game: str, clip_recorder: ClipRecorder | None,
+                      prefix: str = "!", announce_enabled: bool = True):
     """Create DeathBot and run it in a background thread with its own event loop."""
     loop = asyncio.new_event_loop()
     bot = DeathBot(
         token=token,
-        prefix="!",
+        prefix=prefix,
         channel=channel,
         counter=counter,
         game=game,
         clip_recorder=clip_recorder,
+        announce_enabled=announce_enabled,
     )
 
     def _run():

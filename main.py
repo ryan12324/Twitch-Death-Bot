@@ -1,8 +1,15 @@
 """
-Twitch Death Counter Bot - Main entry point.
+Twitch Death Counter Bot - CLI entry point (headless mode).
 
-Connects to a Twitch stream, captures frames, detects death screens
-using image analysis, and announces deaths in chat.
+This is the alternative to the web UI (web/app.py). It reads all config
+from .env, connects to a single Twitch channel, and runs detection until
+you Ctrl+C. For most use cases, run the web app instead:
+
+    python web/app.py       # then open http://localhost:4444/bot
+
+The web UI lets you start/stop jobs, pick channels and profiles from
+a browser, and see live detection video. This CLI mode is useful for
+headless servers or if you only ever monitor one channel.
 """
 
 import asyncio
