@@ -17,6 +17,7 @@ from pathlib import Path
 from dotenv import load_dotenv
 
 from bot.twitch_bot import DeathBot
+from bot.twitch_api import get_channel_game, match_profile_by_game_id
 from detection.clip_recorder import ClipRecorder
 from detection.counter import DeathCounter
 from detection.detector import DeathDetector
@@ -47,13 +48,6 @@ def get_config() -> dict:
         sys.exit(1)
 
     game = os.getenv("GAME_PROFILE", "generic")
-    if game not in list_profiles():
-        logger.error(
-            "Unknown GAME_PROFILE '%s'. Available: %s",
-            game,
-            ", ".join(list_profiles()),
-        )
-        sys.exit(1)
 
     # TARGET_FPS replaces the old CAPTURE_INTERVAL setting
     target_fps = int(os.getenv("TARGET_FPS", "15"))
@@ -68,6 +62,7 @@ def get_config() -> dict:
     return {
         "token": token,
         "channel": channel,
+        "client_id": os.getenv("TWITCH_CLIENT_ID", ""),
         "game": game,
         "target_fps": target_fps,
         "threshold": float(os.getenv("DETECTION_THRESHOLD", "0.80")),
@@ -78,7 +73,64 @@ def get_config() -> dict:
         "clip_post_seconds": float(os.getenv("CLIP_POST_DEATH_SECONDS", "2.0")),
         "clip_output_fps": float(os.getenv("CLIP_OUTPUT_FPS", "10.0")),
         "clip_output_dir": os.getenv("CLIP_OUTPUT_DIR", ""),
+        "command_prefix": os.getenv("COMMAND_PREFIX", "!"),
+        "announce_deaths": os.getenv("ANNOUNCE_DEATHS", "true").lower() in ("true", "1", "yes"),
     }
+
+
+def resolve_game_profile(config: dict) -> str:
+    """Resolve the game profile to use.
+
+    If GAME_PROFILE=auto and a TWITCH_CLIENT_ID is set, queries the
+    Twitch Helix API to detect what game the channel is playing and
+    matches it against known profiles. Falls back to 'generic'.
+    """
+    game = config["game"]
+
+    if game == "auto":
+        client_id = config["client_id"]
+        if not client_id:
+            logger.warning(
+                "GAME_PROFILE=auto requires TWITCH_CLIENT_ID to be set. "
+                "Falling back to 'generic' profile."
+            )
+            return "generic"
+
+        logger.info("Auto-detecting game for channel %s...", config["channel"])
+        info = get_channel_game(config["channel"], client_id, config["token"])
+
+        if info:
+            logger.info(
+                "Channel is playing: %s (game_id=%s)",
+                info["game_name"],
+                info["game_id"],
+            )
+            matched = match_profile_by_game_id(info["game_id"])
+            if matched:
+                logger.info("Matched game profile: %s", matched)
+                return matched
+            else:
+                logger.info(
+                    "No specific profile for '%s', using 'generic'.",
+                    info["game_name"],
+                )
+                return "generic"
+        else:
+            logger.warning(
+                "Could not detect game (channel may be offline). Using 'generic'."
+            )
+            return "generic"
+
+    # Validate the specified profile exists
+    if game not in list_profiles():
+        logger.error(
+            "Unknown GAME_PROFILE '%s'. Available: %s",
+            game,
+            ", ".join(list_profiles()),
+        )
+        sys.exit(1)
+
+    return game
 
 
 # ---------------------------------------------------------------------------
@@ -93,7 +145,6 @@ def detection_loop(
     clip_recorder: ClipRecorder,
     game: str,
     bot: DeathBot,
-    loop: asyncio.AbstractEventLoop,
     stop_event: threading.Event,
 ) -> None:
     """Continuously read frames and check for deaths."""
@@ -125,11 +176,24 @@ def detection_loop(
             # Trigger clip save (captures post-death frames automatically)
             clip_recorder.on_death(session_count)
 
-            # Schedule chat announcement on the bot's event loop
-            asyncio.run_coroutine_threadsafe(
-                bot.announce_death(session_count, total_count),
-                loop,
-            )
+            # Schedule chat announcement on the bot's event loop.
+            # bot.loop is the asyncio loop that twitchio runs on, which
+            # is the only loop where bot coroutines can be awaited.
+            try:
+                loop = bot.loop
+                if loop and loop.is_running():
+                    asyncio.run_coroutine_threadsafe(
+                        bot.announce_death(session_count, total_count),
+                        loop,
+                    )
+                else:
+                    logger.warning(
+                        "Bot event loop not running — skipping chat announcement "
+                        "for death #%d",
+                        session_count,
+                    )
+            except Exception as exc:
+                logger.error("Failed to schedule death announcement: %s", exc)
 
     # Flush any in-progress clip on shutdown
     clip_recorder.flush()
@@ -144,12 +208,13 @@ def detection_loop(
 def main() -> None:
     config = get_config()
 
-    profile = get_profile(config["game"])
+    game_name = resolve_game_profile(config)
+    profile = get_profile(game_name)
     logger.info("Game profile: %s", profile.display_name)
 
     # Initialize components
     counter = DeathCounter()
-    counter.start_session(config["game"])
+    counter.start_session(game_name)
 
     detector = DeathDetector(
         profile=profile,
@@ -174,17 +239,22 @@ def main() -> None:
 
     bot = DeathBot(
         token=config["token"],
-        prefix="!",
+        prefix=config["command_prefix"],
         channel=config["channel"],
         counter=counter,
         game=profile.display_name,
         clip_recorder=clip_recorder,
+        announce_enabled=config["announce_deaths"],
     )
 
     # Graceful shutdown
     stop_event = threading.Event()
+    shutdown_called = threading.Event()
 
     def shutdown(*_):
+        if shutdown_called.is_set():
+            return
+        shutdown_called.set()
         logger.info("Shutting down...")
         stop_event.set()
         capture.stop()
@@ -206,17 +276,17 @@ def main() -> None:
         logger.info("Starting bot in chat-only mode (no detection).")
         logger.info("Detection will start when the stream goes live.")
 
-    # Start detection in background thread
-    loop = asyncio.new_event_loop()
-
+    # Start detection in background thread.
+    # The detection thread uses bot.loop (twitchio's event loop) to schedule
+    # chat announcements via asyncio.run_coroutine_threadsafe.
     detection_thread = threading.Thread(
         target=detection_loop,
-        args=(capture, detector, counter, clip_recorder, config["game"], bot, loop, stop_event),
+        args=(capture, detector, counter, clip_recorder, game_name, bot, stop_event),
         daemon=True,
     )
     detection_thread.start()
 
-    # Run the bot (blocking)
+    # Run the bot (blocking — runs twitchio's asyncio event loop)
     logger.info("Bot starting... Press Ctrl+C to stop.")
     try:
         bot.run()
